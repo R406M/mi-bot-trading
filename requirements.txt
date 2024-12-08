@@ -1,0 +1,4 @@
+flask
+kucoin
+pandas
+gunicorn
