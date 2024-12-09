@@ -1,26 +1,64 @@
-from flask import Flask, request  # Importamos Flask y la clase 'request'
+from flask import Flask, request, jsonify
+from kucoin.client import Trade
 
-# Crear la aplicación Flask
-app = Flask(__name__)  # Se crea una instancia de la aplicación Flask
+# Configuración del bot
+app = Flask(__name__)
+SECRET_TOKEN = "rose"  # Cambia esto por el token configurado en TradingView
 
-# Ruta para recibir señales de TradingView
-@app.route('/webhook', methods=['POST'])  # Ruta que recibe datos por HTTP POST
+# Credenciales de la API de KuCoin
+API_KEY = "tu_api_key"
+API_SECRET = "tu_api_secret"
+API_PASSPHRASE = "tu_passphrase"
+
+# Conexión al cliente de KuCoin
+client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+
+@app.route('/webhook', methods=['POST'])
 def webhook():
-    try:
-        data = request.get_json()  # Obtenemos datos JSON del cuerpo de la solicitud
-        print(f"Señal recibida: {data}")
+    # Recibir la señal desde TradingView
+    data = request.get_json()
+    
+    # Validar si los datos y el token son correctos
+    if not data or data.get('token') != SECRET_TOKEN:
+        return jsonify({"error": "Token inválido"}), 403
+    
+    # Extraer acción y monto de la señal
+    action = data.get('action')
+    amount = data.get('amount')
 
-        # Validar la señal
-        if "action" not in data or data["action"] not in ["buy", "sell"]:
-            return "Señal inválida", 400
+    if action and amount:  # Asegurarse de que los datos sean válidos
+        if action == "buy":
+            try:
+                # Ejecutar una orden de compra
+                response = client.create_market_order(
+                    symbol='DOGE-USDT',  # Cambia al par de criptomonedas que desees
+                    side='buy',
+                    size=amount  # Tamaño de la compra
+                )
+                print(f"Orden de compra realizada: {response}")
+                return jsonify({"status": "success", "message": "Orden de compra ejecutada"}), 200
+            except Exception as e:
+                print(f"Error al realizar la compra: {e}")
+                return jsonify({"error": "Error al realizar la compra"}), 500
+        elif action == "sell":
+            try:
+                # Ejecutar una orden de venta
+                response = client.create_market_order(
+                    symbol='DOGE-USDT',  # Cambia al par de criptomonedas que desees
+                    side='sell',
+                    size=amount  # Tamaño de la venta
+                )
+                print(f"Orden de venta realizada: {response}")
+                return jsonify({"status": "success", "message": "Orden de venta ejecutada"}), 200
+            except Exception as e:
+                print(f"Error al realizar la venta: {e}")
+                return jsonify({"error": "Error al realizar la venta"}), 500
+        else:
+            return jsonify({"error": "Acción no válida"}), 400
+    else:
+        return jsonify({"error": "Datos incompletos"}), 400
 
-        # Ejecutar lógica según los datos recibidos (omito detalles aquí para resumir)
-        return {"status": "success"}, 200
-    except Exception as e:
-        print(f"Error en la recepción de la señal: {e}")
-        return {"status": "error", "message": str(e)}, 500
+if __name__ == '__main__':
+    app.run(debug=True)
 
-# Este bloque inicia la aplicación si se ejecuta el script
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))  # Puerto que usará Flask (puede configurarse por variable de entorno)
-    app.run(host="0.0.0.0", port=port)  # Inicia el servidor Flask
+
