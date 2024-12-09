@@ -29,7 +29,7 @@ market_client = Market()
 
 # Pares de trading y timeframe
 SYMBOL = "DOGE-USDT"
-TIMEFRAME = "5min"
+TIMEFRAME = "15min"
 
 # Límite máximo de operaciones en USDT
 MAX_AMOUNT = 100  # Ajusta este valor según tu riesgo
