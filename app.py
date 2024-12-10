@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade
+from kucoin.client import Trade, Market
 import os
 
 # Configuración del bot
@@ -11,8 +11,9 @@ API_KEY = os.getenv("KUCOIN_API_KEY")
 API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
 API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 
-# Conexión al cliente de KuCoin
-client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+# Conexión a los clientes de KuCoin
+trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+market_client = Market()  # Cliente para obtener datos del mercado
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
@@ -48,7 +49,7 @@ def webhook():
             operation_in_progress = True
 
             # Obtener el precio actual del mercado
-            ticker = client.get_ticker(SYMBOL)
+            ticker = market_client.get_ticker(SYMBOL)  # CORRECCIÓN: Usar cliente Market
             current_price = float(ticker['price'])
 
             # Calcular Take Profit (TP) y Stop Loss (SL)
@@ -56,7 +57,7 @@ def webhook():
             sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
 
             # Ejecutar la orden de compra o venta
-            response = client.create_market_order(
+            response = trade_client.create_market_order(
                 symbol=SYMBOL,
                 side=action,
                 funds=amount  # Ejecutar según el monto recibido
@@ -86,6 +87,7 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
+
 
 
 
