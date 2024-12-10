@@ -1,7 +1,7 @@
 import os
 import json
-import pandas as pd
 import logging
+import pandas as pd
 from flask import Flask, request
 from kucoin.client import Trade, Market
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # Crear la aplicación Flask
 app = Flask(__name__)
 
-# Claves de API de KuCoin (se deben configurar en "Secrets" de Replit)
+# Claves de API de KuCoin
 KUCOIN_API_KEY = os.getenv("KUCOIN_API_KEY")
 KUCOIN_SECRET_KEY = os.getenv("KUCOIN_SECRET_KEY")
 KUCOIN_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
@@ -27,54 +27,70 @@ trade_client = Trade(key=KUCOIN_API_KEY,
                      passphrase=KUCOIN_PASSPHRASE)
 market_client = Market()
 
-# Pares de trading y timeframe
+# Parámetros de trading
 SYMBOL = "DOGE-USDT"
-TIMEFRAME = "15min"
+TIMEFRAME = "5min"  # Temporalidad ajustada
+MAX_AMOUNT = 10  # Límite máximo por operación
+TP_VALUE = 0.2  # Take Profit fijo en USDT
+SL_VALUE = 10  # Stop Loss fijo en USDT
 
-# Límite máximo de operaciones en USDT
-MAX_AMOUNT = 100  # Ajusta este valor según tu riesgo
+# Variable para controlar si una operación está activa
+trade_active = False
 
-# Cálculo del ATR
-def calculate_atr(candles, period=14):
-    # Crear un DataFrame con las 7 columnas que devuelve KuCoin
-    df = pd.DataFrame(
-        candles,
-        columns=['timestamp', 'open', 'close', 'high', 'low', 'volume', 'turnover']
-    )
-
-    # Convertir las columnas a tipo float (KuCoin devuelve cadenas)
-    df[['open', 'close', 'high', 'low', 'volume', 'turnover']] = df[['open', 'close', 'high', 'low', 'volume', 'turnover']].astype(float)
-
-    # Calcular los valores necesarios para ATR
-    df['high-low'] = df['high'] - df['low']
-    df['high-close'] = abs(df['high'] - df['close'].shift(1))
-    df['low-close'] = abs(df['low'] - df['close'].shift(1))
-    df['tr'] = df[['high-low', 'high-close', 'low-close']].max(axis=1)
-    df['atr'] = df['tr'].rolling(window=period).mean()
-
-    # Retornar el último valor del ATR
-    return df['atr'].iloc[-1]
 
 # Función para abrir una orden
-def place_order(action, amount, tp=None, sl=None):
+def place_order(action, amount):
+    global trade_active
     try:
         if action == "buy":
             order = trade_client.create_market_order(SYMBOL, "buy", funds=amount)
         elif action == "sell":
             order = trade_client.create_market_order(SYMBOL, "sell", funds=amount)
-        logger.info(f"Orden {action} ejecutada: {order}")
 
-        # Configurar Take-Profit y Stop-Loss si es necesario
-        if tp or sl:
-            logger.info(f"TP: {tp}, SL: {sl} configurados.")
+        logger.info(f"Orden {action} ejecutada: {order}")
+        trade_active = True  # Indicar que hay una operación activa
         return order
     except Exception as e:
         logger.error(f"Error al ejecutar la orden: {e}")
         return None
 
+
+# Función para monitorear TP y SL
+def monitor_tp_sl(action, entry_price):
+    global trade_active
+    try:
+        while trade_active:
+            ticker = market_client.get_ticker(SYMBOL)
+            current_price = float(ticker['price'])
+
+            if action == "buy":
+                if current_price >= entry_price + TP_VALUE:
+                    logger.info("Take Profit alcanzado (Buy). Cerrando operación.")
+                    trade_client.create_market_order(SYMBOL, "sell", funds=MAX_AMOUNT)
+                    trade_active = False
+                elif current_price <= entry_price - SL_VALUE:
+                    logger.info("Stop Loss alcanzado (Buy). Cerrando operación.")
+                    trade_client.create_market_order(SYMBOL, "sell", funds=MAX_AMOUNT)
+                    trade_active = False
+
+            elif action == "sell":
+                if current_price <= entry_price - TP_VALUE:
+                    logger.info("Take Profit alcanzado (Sell). Cerrando operación.")
+                    trade_client.create_market_order(SYMBOL, "buy", funds=MAX_AMOUNT)
+                    trade_active = False
+                elif current_price >= entry_price + SL_VALUE:
+                    logger.info("Stop Loss alcanzado (Sell). Cerrando operación.")
+                    trade_client.create_market_order(SYMBOL, "buy", funds=MAX_AMOUNT)
+                    trade_active = False
+    except Exception as e:
+        logger.error(f"Error monitoreando TP/SL: {e}")
+        trade_active = False
+
+
 # Ruta para recibir señales de TradingView
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    global trade_active
     try:
         data = request.get_json()
         logger.info(f"Señal recibida: {data}")
@@ -84,33 +100,32 @@ def webhook():
         if data.get("token") != secret_token:
             return {"status": "error", "message": "Token inválido"}, 403
 
-        # Validar acción y cantidad
+        # Validar si ya hay una operación activa
+        if trade_active:
+            return {"status": "error", "message": "Operación activa. Esperando cierre."}, 400
+
+        # Validar acción
         action = data.get("action")
-        amount = data.get("amount", 50)  # Monto predeterminado
-        if action not in ["buy", "sell"] or not isinstance(amount, (int, float)) or amount <= 0:
-            return {"status": "error", "message": "Datos inválidos"}, 400
-
-        # Control de riesgo: validamos que el monto no exceda el límite
-        if amount > MAX_AMOUNT:
-            return {"status": "error", "message": f"Monto excede el límite máximo de {MAX_AMOUNT} USDT"}, 400
-
-        # Obtener datos históricos para calcular ATR
-        candles = market_client.get_kline(SYMBOL, TIMEFRAME)
-        atr = calculate_atr(candles)
-
-        # Calcular TP y SL dinámicos
-        last_price = float(candles[-1][2])  # Último precio alto
-        tp = last_price + (2 * atr) if data["action"] == "buy" else last_price - (2 * atr)
-        sl = last_price - (2 * atr) if data["action"] == "buy" else last_price + (2 * atr)
+        amount = data.get("amount", 10)
+        if action not in ["buy", "sell"]:
+            return {"status": "error", "message": "Acción inválida."}, 400
 
         # Ejecutar la orden
-        order = place_order(data["action"], amount, tp, sl)
-        return {"status": "success", "order": order}, 200
+        ticker = market_client.get_ticker(SYMBOL)
+        entry_price = float(ticker['price'])  # Precio actual de mercado
+
+        order = place_order(action, amount)
+        if order:
+            # Monitorear TP y SL
+            monitor_tp_sl(action, entry_price)
+
+        return {"status": "success", "message": "Operación ejecutada."}, 200
+
     except Exception as e:
         logger.error(f"Error en la recepción de la señal: {e}")
         return {"status": "error", "message": str(e)}, 500
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))  # Puerto asignado por Replit
-    app.run(host="0.0.0.0", port=port)
 
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
