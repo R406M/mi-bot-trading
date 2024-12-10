@@ -4,6 +4,7 @@ import logging
 import pandas as pd
 from flask import Flask, request
 from kucoin.client import Trade, Market
+import threading
 
 # Configuración del logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -100,41 +101,71 @@ def webhook():
             logger.warning("Token inválido recibido.")
             return {"status": "error", "message": "Token inválido"}, 403
 
-        # Procesar la acción
-        action = data.get("action")
-        amount = data.get("amount", 50)
-
-        # Logs adicionales para debug
-        logger.info(f"Acción: {action}, Monto: {amount}")
-        return {"status": "success", "message": "Señal procesada"}, 200
-    except Exception as e:
-        logger.error(f"Error procesando la señal: {e}")
-        return {"status": "error", "message": str(e)}, 500
-
-
         # Validar si ya hay una operación activa
         if trade_active:
             return {"status": "error", "message": "Operación activa. Esperando cierre."}, 400
 
         # Validar acción
         action = data.get("action")
-        amount = data.get("amount", 10)
         if action not in ["buy", "sell"]:
             return {"status": "error", "message": "Acción inválida."}, 400
 
-        # Ejecutar la orden
+        # Consultar el precio actual
         ticker = market_client.get_ticker(SYMBOL)
-        entry_price = float(ticker['price'])  # Precio actual de mercado
+        entry_price = float(ticker['price'])
 
-        order = place_order(action, amount)
+        # Procesar acción "buy"
+        if action == "buy":
+            try:
+                # Consultar el saldo disponible en USDT
+                account_balance = trade_client.get_account_balance("USDT")
+                available_usdt = float(account_balance['available'])
+
+                if available_usdt > 0:
+                    logger.info(f"Saldo disponible en USDT: {available_usdt}")
+                    order = place_order("buy", available_usdt)
+                else:
+                    logger.warning("No hay saldo disponible en USDT para comprar.")
+                    return {"status": "error", "message": "No hay saldo disponible en USDT."}, 400
+
+            except Exception as e:
+                logger.error(f"Error al consultar el saldo de USDT: {e}")
+                return {"status": "error", "message": "Error al consultar el saldo de USDT."}, 500
+
+        # Procesar acción "sell"
+        elif action == "sell":
+            try:
+                # Consultar el saldo disponible de DOGE
+                account_balance = trade_client.get_account_balance(SYMBOL.split("-")[0])  # "DOGE"
+                available_doge = float(account_balance['available'])
+
+                if available_doge > 0:
+                    logger.info(f"Saldo disponible en DOGE: {available_doge}")
+                    order = place_order("sell", available_doge)
+                else:
+                    logger.warning("No hay saldo disponible de DOGE para vender.")
+                    return {"status": "error", "message": "No hay saldo disponible de DOGE."}, 400
+
+            except Exception as e:
+                logger.error(f"Error al consultar el saldo de DOGE: {e}")
+                return {"status": "error", "message": "Error al consultar el saldo de DOGE."}, 500
+
+        # Monitorear TP y SL si la orden fue exitosa
         if order:
-            # Monitorear TP y SL
-            monitor_tp_sl(action, entry_price)
+            trade_active = True
+            threading.Thread(target=monitor_tp_sl, args=(action, entry_price)).start()
 
         return {"status": "success", "message": "Operación ejecutada."}, 200
 
     except Exception as e:
         logger.error(f"Error en la recepción de la señal: {e}")
+        return {"status": "error", "message": str(e)}, 500
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
         return {"status": "error", "message": str(e)}, 500
 
 if __name__ == "__main__":
