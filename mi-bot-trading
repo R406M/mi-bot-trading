@@ -90,7 +90,6 @@ def monitor_tp_sl(action, entry_price):
 # Ruta para recibir señales de TradingView
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    global trade_active
     try:
         data = request.get_json()
         logger.info(f"Señal recibida: {data}")
@@ -98,7 +97,20 @@ def webhook():
         # Validar token secreto
         secret_token = os.getenv("WEBHOOK_SECRET", "default_token")
         if data.get("token") != secret_token:
+            logger.warning("Token inválido recibido.")
             return {"status": "error", "message": "Token inválido"}, 403
+
+        # Procesar la acción
+        action = data.get("action")
+        amount = data.get("amount", 50)
+
+        # Logs adicionales para debug
+        logger.info(f"Acción: {action}, Monto: {amount}")
+        return {"status": "success", "message": "Señal procesada"}, 200
+    except Exception as e:
+        logger.error(f"Error procesando la señal: {e}")
+        return {"status": "error", "message": str(e)}, 500
+
 
         # Validar si ya hay una operación activa
         if trade_active:
