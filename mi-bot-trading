@@ -115,40 +115,41 @@ def webhook():
         entry_price = float(ticker['price'])
 
         # Procesar acción "buy"
-        if action == "buy":
-            try:
-                # Consultar el saldo disponible en USDT
-                account_balance = trade_client.get_account_balance("USDT")
-                available_usdt = float(account_balance['available'])
+if action == "buy":
+    try:
+        # Consultar el saldo disponible en USDT
+        account_balance = trade_client.get_account_balance("USDT")
+        available_usdt = float(account_balance['available'])
 
-                if available_usdt > 0:
-                    logger.info(f"Saldo disponible en USDT: {available_usdt}")
-                    order = place_order("buy", available_usdt)
-                else:
-                    logger.warning("No hay saldo disponible en USDT para comprar.")
-                    return {"status": "error", "message": "No hay saldo disponible en USDT."}, 400
+        if available_usdt >= MAX_AMOUNT:  # Restringir al MAX_AMOUNT
+            logger.info(f"Saldo suficiente en USDT: {available_usdt}. Ejecutando orden BUY con {MAX_AMOUNT} USDT.")
+            order = place_order("buy", MAX_AMOUNT)
+        else:
+            logger.warning("No hay saldo suficiente en USDT para comprar.")
+            return {"status": "error", "message": "No hay saldo suficiente en USDT para comprar."}, 400
 
-            except Exception as e:
-                logger.error(f"Error al consultar el saldo de USDT: {e}")
-                return {"status": "error", "message": "Error al consultar el saldo de USDT."}, 500
+    except Exception as e:
+        logger.error(f"Error al consultar el saldo de USDT: {e}")
+        return {"status": "error", "message": "Error al consultar el saldo de USDT."}, 500
 
-        # Procesar acción "sell"
-        elif action == "sell":
-            try:
-                # Consultar el saldo disponible de DOGE
-                account_balance = trade_client.get_account_balance(SYMBOL.split("-")[0])  # "DOGE"
-                available_doge = float(account_balance['available'])
+# Procesar acción "sell"
+elif action == "sell":
+    try:
+        # Consultar el saldo disponible de DOGE
+        account_balance = trade_client.get_account_balance(SYMBOL.split("-")[0])  # "DOGE"
+        available_doge = float(account_balance['available'])
 
-                if available_doge > 0:
-                    logger.info(f"Saldo disponible en DOGE: {available_doge}")
-                    order = place_order("sell", available_doge)
-                else:
-                    logger.warning("No hay saldo disponible de DOGE para vender.")
-                    return {"status": "error", "message": "No hay saldo disponible de DOGE."}, 400
+        if available_doge >= MAX_AMOUNT:  # Restringir al MAX_AMOUNT
+            logger.info(f"Saldo suficiente en DOGE: {available_doge}. Ejecutando orden SELL con {MAX_AMOUNT} DOGE.")
+            order = place_order("sell", MAX_AMOUNT)
+        else:
+            logger.warning("No hay saldo suficiente en DOGE para vender.")
+            return {"status": "error", "message": "No hay saldo suficiente en DOGE para vender."}, 400
 
-            except Exception as e:
-                logger.error(f"Error al consultar el saldo de DOGE: {e}")
-                return {"status": "error", "message": "Error al consultar el saldo de DOGE."}, 500
+    except Exception as e:
+        logger.error(f"Error al consultar el saldo de DOGE: {e}")
+        return {"status": "error", "message": "Error al consultar el saldo de DOGE."}, 500
+
 
         # Monitorear TP y SL si la orden fue exitosa
         if order:
