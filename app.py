@@ -52,17 +52,39 @@ def webhook():
             ticker = market_client.get_ticker(SYMBOL)  # CORRECCIÓN: Usar cliente Market
             current_price = float(ticker['price'])
 
+            # Límite de compra para "buy" a 10 USDT máximo
+            if action == "buy":
+                amount = min(amount, 10.0)  # Limitar compra a 10 USDT máximo
+
+            # Ejecutar la orden de compra o venta
+            if action == "buy":
+                response = trade_client.create_market_order(
+                    symbol=SYMBOL,
+                    side=action,
+                    funds=amount  # Ejecutar según el monto limitado
+                )
+            elif action == "sell":
+                # Obtener el saldo disponible de DOGE para vender
+                account_balance = trade_client.get_account_balance(SYMBOL.split("-")[0])  # "DOGE"
+                available_doge = float(account_balance['available'])
+
+                # Si hay DOGE disponible, vender todo el saldo
+                if available_doge > 0:
+                    response = trade_client.create_market_order(
+                        symbol=SYMBOL,
+                        side=action,
+                        size=available_doge  # Vender todo el saldo disponible
+                    )
+                else:
+                    # Si no hay DOGE disponible para vender
+                    operation_in_progress = False
+                    return jsonify({"error": "No hay DOGE disponible para vender."}), 400
+
+            print(f"Orden {action} realizada: {response}")
+
             # Calcular Take Profit (TP) y Stop Loss (SL)
             tp_price = current_price + TAKE_PROFIT if action == "buy" else current_price - TAKE_PROFIT
             sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
-
-            # Ejecutar la orden de compra o venta
-            response = trade_client.create_market_order(
-                symbol=SYMBOL,
-                side=action,
-                funds=amount  # Ejecutar según el monto recibido
-            )
-            print(f"Orden {action} realizada: {response}")
 
             # Simulación de TP/SL (debe integrarse con un bot de monitoreo de precios si es real)
             print(f"TP configurado en {tp_price} USDT, SL configurado en {sl_price} USDT")
@@ -83,6 +105,7 @@ def webhook():
             return jsonify({"error": f"Error al ejecutar la orden {action}"}), 500
     else:
         return jsonify({"error": "Datos incompletos"}), 400
+
 
 
 if __name__ == '__main__':
