@@ -59,7 +59,7 @@ def webhook():
             # Comprar con todo el saldo disponible en USDT
             if action == "buy":
                 # Obtener saldo disponible en USDT desde la cuenta de Trading
-                balance = user_client.get_account("USDT")
+                balance = user_client.get_account(currency="USDT", account_type="trade")
                 available_usdt = float(balance['available'])
                 if available_usdt < 10:  # Verificar que haya suficiente saldo
                     return jsonify({"error": "Saldo insuficiente para realizar la compra"}), 400
@@ -73,7 +73,7 @@ def webhook():
             # Vender todos los DOGE disponibles
             elif action == "sell":
                 # Obtener saldo disponible en DOGE desde la cuenta de Trading
-                balance = user_client.get_account("DOGE")
+                balance = user_client.get_account(currency="DOGE", account_type="trade")
                 available_doge = float(balance['available'])
                 if available_doge == 0:
                     return jsonify({"error": "No hay DOGE disponible para vender"}), 400
