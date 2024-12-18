@@ -12,7 +12,7 @@ API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
 API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 
 # Conexión a los clientes de KuCoin
-trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHSE)
+trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()  # Cliente para obtener datos del mercado
 
 # Configuración fija
