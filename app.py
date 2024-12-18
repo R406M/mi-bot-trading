@@ -24,6 +24,15 @@ STOP_LOSS = 10.0   # Pérdida fija (USDT)
 operation_in_progress = False  # Controla si ya hay una operación activa
 
 
+def get_account_balance(currency):
+    """Obtiene el saldo disponible para una moneda especificada."""
+    accounts = trade_client.get_account_list()
+    for account in accounts:
+        if account['currency'] == currency and account['type'] == 'trade':
+            return float(account['available'])
+    return 0.0
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     global operation_in_progress
@@ -39,61 +48,68 @@ def webhook():
     if operation_in_progress:
         return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
 
-    # Extraer acción y monto de la señal
+    # Extraer acción de la señal
     action = data.get('action')
-    amount = float(data.get('amount', 0))  # Monto enviado desde la señal
+    if action not in ["buy", "sell"]:
+        return jsonify({"error": "Acción inválida"}), 400
 
-    if action and amount > 0:  # Asegurarse de que los datos sean válidos
-        try:
-            # Iniciar operación
-            operation_in_progress = True
+    try:
+        # Iniciar operación
+        operation_in_progress = True
 
-            # Obtener el precio actual del mercado
-            ticker = market_client.get_ticker(SYMBOL)  # CORRECCIÓN: Usar cliente Market
-            current_price = float(ticker['price'])
+        # Obtener el precio actual del mercado
+        ticker = market_client.get_ticker(SYMBOL)
+        current_price = float(ticker['price'])
 
-            # Calcular Take Profit (TP) y Stop Loss (SL)
-            tp_price = current_price + TAKE_PROFIT if action == "buy" else current_price - TAKE_PROFIT
-            sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
+        # Calcular Take Profit (TP) y Stop Loss (SL)
+        tp_price = current_price + TAKE_PROFIT if action == "buy" else current_price - TAKE_PROFIT
+        sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
 
-            # Ejecutar la orden de compra o venta
-            try:
-                response = trade_client.create_market_order(
-                    symbol=SYMBOL,
-                    side=action,
-                    funds=amount  # Compramos con los USDT indicados en "amount"
-                )
-                print(f"Orden {action} realizada: {response}")
-            except Exception as e:
-                print(f"Error al ejecutar la orden {action}: {e}")
-                return jsonify({"error": f"Error al ejecutar la orden {action}: {str(e)}"}), 500
+        # Determinar el saldo a utilizar según la acción
+        if action == "buy":
+            usdt_balance = get_account_balance("USDT")
+            if usdt_balance <= 0:
+                operation_in_progress = False
+                return jsonify({"error": "Saldo insuficiente en USDT"}), 400
 
-            # Simulación de TP/SL (debe integrarse con un bot de monitoreo de precios si es real)
-            print(f"TP configurado en {tp_price} USDT, SL configurado en {sl_price} USDT")
+            # Comprar con todo el saldo de USDT disponible
+            response = trade_client.create_market_order(
+                symbol=SYMBOL,
+                side="buy",
+                funds=usdt_balance
+            )
 
-            # Finalizar operación
-            operation_in_progress = False
-            return jsonify({
-                "status": "success",
-                "message": f"Orden {action} ejecutada",
-                "take_profit": tp_price,
-                "stop_loss": sl_price
-            }), 200
+        elif action == "sell":
+            doge_balance = get_account_balance("DOGE")
+            if doge_balance <= 0:
+                operation_in_progress = False
+                return jsonify({"error": "Saldo insuficiente en DOGE"}), 400
 
-        except Exception as e:
-            # Manejar errores en la operación
-            operation_in_progress = False
-            print(f"Error al ejecutar la orden {action}: {e}")
-            return jsonify({"error": f"Error al ejecutar la orden {action}"}), 500
-    else:
-        return jsonify({"error": "Datos incompletos"}), 400
+            # Vender todos los DOGE disponibles
+            response = trade_client.create_market_order(
+                symbol=SYMBOL,
+                side="sell",
+                size=doge_balance  # DOGE disponible
+            )
 
+        print(f"Orden {action} realizada: {response}")
+        print(f"TP configurado en {tp_price} USDT, SL configurado en {sl_price} USDT")
 
+        # Finalizar operación
+        operation_in_progress = False
+        return jsonify({
+            "status": "success",
+            "message": f"Orden {action} ejecutada",
+            "take_profit": tp_price,
+            "stop_loss": sl_price
+        }), 200
+
+    except Exception as e:
+        # Manejar errores en la operación
+        operation_in_progress = False
+        print(f"Error al ejecutar la orden {action}: {e}")
+        return jsonify({"error": f"Error al ejecutar la orden {action}: {str(e)}"}), 500
 
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
-
-
-
-
