@@ -25,6 +25,24 @@ STOP_LOSS = 10.0   # Pérdida fija (USDT)
 operation_in_progress = False  # Controla si ya hay una operación activa
 
 
+def get_market_rules(symbol):
+    """
+    Obtiene las reglas de mercado para un par de trading específico.
+    """
+    try:
+        market_info = market_client.get_symbol_list()
+        for item in market_info:
+            if item['symbol'] == symbol:
+                return {
+                    "min_funds": float(item['minFunds']),  # Cantidad mínima de compra en USDT
+                    "price_increment": float(item['priceIncrement']),  # Incremento permitido en precio
+                    "quantity_increment": float(item['baseIncrement'])  # Incremento permitido en cantidad (DOGE)
+                }
+    except Exception as e:
+        print(f"Error al obtener reglas de mercado: {e}")
+    return None
+
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     global operation_in_progress
@@ -52,9 +70,14 @@ def webhook():
             ticker = market_client.get_ticker(SYMBOL)
             current_price = float(ticker['price'])
 
-            # Calcular Take Profit (TP) y Stop Loss (SL)
-            tp_price = current_price + TAKE_PROFIT if action == "buy" else current_price - TAKE_PROFIT
-            sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
+            # Obtener reglas del mercado
+            rules = get_market_rules(SYMBOL)
+            if not rules:
+                return jsonify({"error": "No se pudieron obtener las reglas de mercado"}), 500
+
+            min_funds = rules["min_funds"]
+            price_increment = rules["price_increment"]
+            quantity_increment = rules["quantity_increment"]
 
             # Comprar con todo el saldo disponible en USDT
             if action == "buy":
@@ -62,15 +85,17 @@ def webhook():
                 accounts = user_client.get_account_list()
                 usdt_account = next((acc for acc in accounts if acc['currency'] == "USDT" and acc['type'] == "trade"), None)
 
-                if not usdt_account or float(usdt_account['available']) < 10:
-                    return jsonify({"error": "Saldo insuficiente en USDT para realizar la compra"}), 400
+                if not usdt_account or float(usdt_account['available']) < min_funds:
+                    return jsonify({"error": f"Saldo insuficiente en USDT para realizar la compra. Mínimo requerido: {min_funds}"}), 400
 
                 available_usdt = float(usdt_account['available'])
+                # Redondear al incremento permitido por el mercado
+                adjusted_usdt = available_usdt - (available_usdt % price_increment)
 
                 response = trade_client.create_market_order(
                     symbol=SYMBOL,
                     side="buy",
-                    funds=available_usdt
+                    funds=adjusted_usdt
                 )
 
             # Vender todos los DOGE disponibles
@@ -83,23 +108,22 @@ def webhook():
                     return jsonify({"error": "No hay DOGE disponible para vender"}), 400
 
                 available_doge = float(doge_account['available'])
+                # Redondear al incremento permitido por el mercado
+                adjusted_doge = available_doge - (available_doge % quantity_increment)
 
                 response = trade_client.create_market_order(
                     symbol=SYMBOL,
                     side="sell",
-                    size=available_doge
+                    size=adjusted_doge
                 )
 
             print(f"Orden {action} realizada: {response}")
-            print(f"TP configurado en {tp_price} USDT, SL configurado en {sl_price} USDT")
 
             # Finalizar operación
             operation_in_progress = False
             return jsonify({
                 "status": "success",
-                "message": f"Orden {action} ejecutada",
-                "take_profit": tp_price,
-                "stop_loss": sl_price
+                "message": f"Orden {action} ejecutada"
             }), 200
 
         except Exception as e:
