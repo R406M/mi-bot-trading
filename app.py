@@ -58,11 +58,14 @@ def webhook():
 
             # Comprar con todo el saldo disponible en USDT
             if action == "buy":
-                # Obtener saldo disponible en USDT desde la cuenta de Trading
-                balance = user_client.get_account(currency="USDT", account_type="trade")
-                available_usdt = float(balance['available'])
-                if available_usdt < 10:  # Verificar que haya suficiente saldo
-                    return jsonify({"error": "Saldo insuficiente para realizar la compra"}), 400
+                # Obtener todas las cuentas y filtrar la cuenta de USDT en Trading
+                accounts = user_client.get_account_list()
+                usdt_account = next((acc for acc in accounts if acc['currency'] == "USDT" and acc['type'] == "trade"), None)
+
+                if not usdt_account or float(usdt_account['available']) < 10:
+                    return jsonify({"error": "Saldo insuficiente en USDT para realizar la compra"}), 400
+
+                available_usdt = float(usdt_account['available'])
 
                 response = trade_client.create_market_order(
                     symbol=SYMBOL,
@@ -72,11 +75,14 @@ def webhook():
 
             # Vender todos los DOGE disponibles
             elif action == "sell":
-                # Obtener saldo disponible en DOGE desde la cuenta de Trading
-                balance = user_client.get_account(currency="DOGE", account_type="trade")
-                available_doge = float(balance['available'])
-                if available_doge == 0:
+                # Obtener todas las cuentas y filtrar la cuenta de DOGE en Trading
+                accounts = user_client.get_account_list()
+                doge_account = next((acc for acc in accounts if acc['currency'] == "DOGE" and acc['type'] == "trade"), None)
+
+                if not doge_account or float(doge_account['available']) == 0:
                     return jsonify({"error": "No hay DOGE disponible para vender"}), 400
+
+                available_doge = float(doge_account['available'])
 
                 response = trade_client.create_market_order(
                     symbol=SYMBOL,
