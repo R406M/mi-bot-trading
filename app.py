@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market
+from kucoin.client import Trade, Market, Account
 import os
 import time
 
@@ -13,8 +13,9 @@ API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
 API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 
 # Conexión a los clientes de KuCoin
-trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHSE)
 market_client = Market()  # Cliente para obtener datos del mercado
+account_client = Account(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Cliente para acceder a las cuentas
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
@@ -58,7 +59,7 @@ def webhook():
             # Ejecutar la orden de compra o venta
             if action == "buy":
                 # Obtener el saldo de USDT disponible
-                accounts = trade_client.get_accounts()
+                accounts = account_client.get_accounts()
                 usdt_balance = next((account['balance'] for account in accounts if account['currency'] == 'USDT'), 0)
 
                 if usdt_balance > 0:
@@ -80,12 +81,14 @@ def webhook():
                             if current_price >= tp_price:
                                 print(f"Take Profit alcanzado: {current_price}")
                                 # Vender todo el DOGE
+                                doge_balance = next((account['balance'] for account in accounts if account['currency'] == 'DOGE'), 0)
                                 trade_client.create_market_order(symbol=SYMBOL, side="sell", funds=doge_balance)
                                 print(f"Orden de venta ejecutada con TP en {tp_price}")
                                 break
                             elif current_price <= sl_price:
                                 print(f"Stop Loss alcanzado: {current_price}")
                                 # Vender todo el DOGE
+                                doge_balance = next((account['balance'] for account in accounts if account['currency'] == 'DOGE'), 0)
                                 trade_client.create_market_order(symbol=SYMBOL, side="sell", funds=doge_balance)
                                 print(f"Orden de venta ejecutada con SL en {sl_price}")
                                 break
@@ -94,7 +97,7 @@ def webhook():
 
             elif action == "sell":
                 # Obtener el saldo de DOGE disponible
-                accounts = trade_client.get_accounts()
+                accounts = account_client.get_accounts()
                 doge_balance = next((account['balance'] for account in accounts if account['currency'] == 'DOGE'), 0)
 
                 if doge_balance > 0:
