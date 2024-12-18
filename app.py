@@ -30,7 +30,8 @@ def webhook():
 
     # Recibir la señal desde TradingView
     data = request.get_json()
-
+    print(f"Datos recibidos: {data}")  # Imprime los datos para depuración
+    
     # Validar si los datos y el token son correctos
     if not data or data.get('token') != SECRET_TOKEN:
         return jsonify({"error": "Token inválido"}), 403
