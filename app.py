@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from kucoin.client import Trade, Market
 import os
-import time
 
 # Configuración del bot
 app = Flask(__name__)
@@ -13,7 +12,7 @@ API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
 API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 
 # Conexión a los clientes de KuCoin
-trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHSE)
 market_client = Market()  # Cliente para obtener datos del mercado
 
 # Configuración fija
@@ -39,11 +38,10 @@ def webhook():
     if operation_in_progress:
         return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
 
-    # Extraer acción y monto de la señal
+    # Extraer acción de la señal (buy o sell)
     action = data.get('action')
-    amount = float(data.get('amount', 0))  # Monto enviado desde la señal
 
-    if action and amount > 0:  # Asegurarse de que los datos sean válidos
+    if action:  # Asegurarse de que los datos sean válidos
         try:
             # Iniciar operación
             operation_in_progress = True
@@ -56,33 +54,45 @@ def webhook():
             tp_price = current_price + TAKE_PROFIT if action == "buy" else current_price - TAKE_PROFIT
             sl_price = current_price - STOP_LOSS if action == "buy" else current_price + STOP_LOSS
 
-            # Ejecutar la orden de compra o venta
-            try:
-                response = trade_client.create_market_order(
-                    symbol=SYMBOL,
-                    side=action,
-                    funds=amount if action == "buy" else None,  # Compramos con los USDT indicados
-                    size=amount if action == "sell" else None   # Vendemos según la cantidad de DOGE
-                )
-                print(f"Orden {action} realizada: {response}")
+            if action == "buy":
+                # Obtener el saldo disponible en USDT
+                accounts = trade_client.get_account_list()
+                usdt_balance = next((item for item in accounts if item['currency'] == 'USDT'), None)
+                
+                if usdt_balance and float(usdt_balance['available']) > 0:
+                    available_usdt = float(usdt_balance['available'])  # Obtén el saldo disponible en USDT
+                    
+                    # Ejecutar la compra con todo el saldo en USDT
+                    response = trade_client.create_market_order(
+                        symbol=SYMBOL,
+                        side='buy',
+                        funds=available_usdt  # Usamos todo el saldo disponible en USDT para comprar DOGE
+                    )
+                    print(f"Orden de compra ejecutada: {response}")
+                else:
+                    print("No tienes saldo USDT suficiente para comprar.")
+                    return jsonify({"error": "Saldo insuficiente para comprar"}), 400
 
-                # Esperar la confirmación de la operación
-                order_id = response.get('orderId')
-                if order_id:
-                    # Revisar el estado de la orden hasta que se complete
-                    while True:
-                        order_status = trade_client.get_order(order_id)
-                        if order_status['status'] == 'done':
-                            print(f"Orden {action} completada: {order_status}")
-                            break
-                        time.sleep(2)  # Espera de 2 segundos antes de volver a consultar
+            elif action == "sell":
+                # Obtener el saldo disponible de DOGE
+                accounts = trade_client.get_account_list()
+                doge_balance = next((item for item in accounts if item['currency'] == 'DOGE'), None)
+                
+                if doge_balance and float(doge_balance['available']) > 0:
+                    available_doge = float(doge_balance['available'])  # Obtén la cantidad disponible de DOGE
+                    
+                    # Ejecutar la venta de todo el saldo de DOGE
+                    response = trade_client.create_market_order(
+                        symbol=SYMBOL,
+                        side='sell',
+                        amount=available_doge  # Vende todo el saldo disponible de DOGE
+                    )
+                    print(f"Orden de venta ejecutada: {response}")
+                else:
+                    print("No tienes DOGE suficiente para vender.")
+                    return jsonify({"error": "Saldo insuficiente de DOGE para vender"}), 400
 
-            except Exception as e:
-                print(f"Error al ejecutar la orden {action}: {e}")
-                operation_in_progress = False
-                return jsonify({"error": f"Error al ejecutar la orden {action}: {str(e)}"}), 500
-
-            # Simulación de TP/SL (debe integrarse con un bot de monitoreo de precios si es real)
+            # Simulación de TP/SL (esto debe integrarse con un bot de monitoreo de precios si es real)
             print(f"TP configurado en {tp_price} USDT, SL configurado en {sl_price} USDT")
 
             # Finalizar operación
@@ -101,6 +111,7 @@ def webhook():
             return jsonify({"error": f"Error al ejecutar la orden {action}"}), 500
     else:
         return jsonify({"error": "Datos incompletos"}), 400
+
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
