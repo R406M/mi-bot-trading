@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market, Account
+from kucoin.client import Trade, Market, Client  # Cambié Account a Client
 import os
 import time
 
@@ -15,7 +15,7 @@ API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 # Conexión a los clientes de KuCoin
 trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHSE)
 market_client = Market()  # Cliente para obtener datos del mercado
-account_client = Account(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Cliente para acceder a las cuentas
+client = Client(API_KEY, API_SECRET)  # Usamos Client para obtener el saldo
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
@@ -59,7 +59,7 @@ def webhook():
             # Ejecutar la orden de compra o venta
             if action == "buy":
                 # Obtener el saldo de USDT disponible
-                accounts = account_client.get_accounts()
+                accounts = client.get_accounts()  # Usamos Client para obtener las cuentas
                 usdt_balance = next((account['balance'] for account in accounts if account['currency'] == 'USDT'), 0)
 
                 if usdt_balance > 0:
@@ -97,7 +97,7 @@ def webhook():
 
             elif action == "sell":
                 # Obtener el saldo de DOGE disponible
-                accounts = account_client.get_accounts()
+                accounts = client.get_accounts()  # Usamos Client para obtener las cuentas
                 doge_balance = next((account['balance'] for account in accounts if account['currency'] == 'DOGE'), 0)
 
                 if doge_balance > 0:
