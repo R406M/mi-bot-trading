@@ -19,8 +19,8 @@ market_client = Market()
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
-TAKE_PROFIT = 0.2  # Ganancia fija (USDT)
-STOP_LOSS = 10.0   # Pérdida fija (USDT)
+TAKE_PROFIT = 0.2  # Ganancia fija en USDT
+STOP_LOSS = 10.0   # Pérdida fija en USDT
 
 # Estado del bot
 operation_in_progress = False
@@ -32,24 +32,65 @@ def webhook():
     global operation_in_progress, current_order
 
     # Recibir y validar la señal desde TradingView
-    data = request.get_json()
-    print(f"Datos recibidos: {data}")
+    try:
+        data = request.get_json()
+        print(f"Datos recibidos: {data}")
 
-    if not data or data.get('token') != SECRET_TOKEN:
-        return jsonify({"error": "Token inválido"}), 403
+        if not data:
+            return jsonify({"error": "No se recibió ningún dato"}), 400
 
-    action = data.get('action')
-    amount = float(data.get('amount', 0))
+        required_fields = ["token", "action", "amount"]
+        missing_fields = [field for field in required_fields if field not in data]
 
-    if not action or amount <= 0:
-        return jsonify({"error": "Datos incompletos"}), 400
+        if missing_fields:
+            return jsonify({"error": f"Faltan campos requeridos: {', '.join(missing_fields)}"}), 400
 
-    # Si hay una operación en curso, rechazar nuevas señales
-    if operation_in_progress:
-        return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
+        # Validar el token
+        if data.get('token') != SECRET_TOKEN:
+            return jsonify({"error": "Token inválido"}), 403
+
+        # Validar acción y monto
+        action = data.get('action')
+        try:
+            amount = float(data.get('amount', 0))
+            if amount <= 0:
+                raise ValueError
+        except ValueError:
+            return jsonify({"error": "El campo 'amount' debe ser un número mayor que 0"}), 400
+
+        if action not in ["buy", "sell"]:
+            return jsonify({"error": "Acción inválida, debe ser 'buy' o 'sell'"}), 400
+
+        # Si hay una operación en curso, cerrarla antes de continuar
+        if operation_in_progress:
+            print("Cerrando operación anterior...")
+            close_operation()
+
+        # Ejecutar la nueva operación
+        operation_in_progress = True
+        threading.Thread(target=execute_trade, args=(action,)).start()
+
+        return jsonify({"status": "success", "message": f"Señal {action} recibida y procesada"}), 200
+
+    except Exception as e:
+        print(f"Error en el webhook: {e}")
+        return jsonify({"error": "Error interno en el servidor"}), 500
+
+
+def get_balance(currency):
+    """Obtener balance de una moneda específica."""
+    accounts = trade_client.get_accounts()
+    for account in accounts:
+        if account['currency'] == currency and account['type'] == 'trade':
+            return float(account['balance'])
+    return 0.0
+
+
+def execute_trade(action):
+    """Ejecutar la operación de compra o venta."""
+    global operation_in_progress, current_order
 
     try:
-        operation_in_progress = True
         ticker = market_client.get_ticker(SYMBOL)
         current_price = float(ticker['price'])
 
@@ -65,7 +106,7 @@ def webhook():
                 })
             else:
                 raise Exception("Saldo insuficiente de USDT")
-        
+
         elif action == "sell":
             doge_balance = get_balance("DOGE")
             if doge_balance > 0:
@@ -79,29 +120,12 @@ def webhook():
             else:
                 raise Exception("Saldo insuficiente de DOGE")
 
-        # Iniciar monitoreo para TP/SL en un hilo separado
+        # Monitorear TP/SL en un hilo separado
         threading.Thread(target=monitor_price).start()
 
-        return jsonify({
-            "status": "success",
-            "message": f"Orden {action} ejecutada",
-            "tp_price": current_order['tp_price'],
-            "sl_price": current_order['sl_price']
-        }), 200
-
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error ejecutando la operación: {e}")
         operation_in_progress = False
-        return jsonify({"error": str(e)}), 500
-
-
-def get_balance(currency):
-    """Obtener balance de una moneda específica."""
-    accounts = trade_client.get_accounts()
-    for account in accounts:
-        if account['currency'] == currency and account['type'] == 'trade':
-            return float(account['balance'])
-    return 0.0
 
 
 def monitor_price():
@@ -114,35 +138,42 @@ def monitor_price():
             current_price = float(ticker['price'])
 
             if current_order['side'] == "buy":
-                if current_price >= current_order['tp_price']:
-                    sell_all()
-                    print("Take Profit alcanzado.")
-                elif current_price <= current_order['sl_price']:
-                    sell_all()
-                    print("Stop Loss alcanzado.")
+                if current_price >= current_order['tp_price'] or current_price <= current_order['sl_price']:
+                    close_operation()
+                    return
             elif current_order['side'] == "sell":
-                if current_price <= current_order['tp_price']:
-                    print("Take Profit alcanzado.")
-                    operation_in_progress = False
-                elif current_price >= current_order['sl_price']:
-                    print("Stop Loss alcanzado.")
-                    operation_in_progress = False
+                if current_price <= current_order['tp_price'] or current_price >= current_order['sl_price']:
+                    close_operation()
+                    return
 
-            time.sleep(5)  # Revisar cada 5 segundos
+            time.sleep(5)
 
         except Exception as e:
             print(f"Error monitoreando el precio: {e}")
             operation_in_progress = False
 
 
-def sell_all():
-    """Función para vender todo el DOGE en caso de TP o SL."""
+def close_operation():
+    """Cerrar cualquier operación activa."""
     global operation_in_progress
+
+    try:
+        if current_order['side'] == "buy":
+            sell_all()
+        elif current_order['side'] == "sell":
+            print("Operación de venta completada.")
+
+        operation_in_progress = False
+    except Exception as e:
+        print(f"Error cerrando la operación: {e}")
+
+
+def sell_all():
+    """Vender todo el DOGE en caso de TP, SL o nueva señal."""
     doge_balance = get_balance("DOGE")
     if doge_balance > 0:
         trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
-        print("Orden de venta ejecutada por TP/SL")
-    operation_in_progress = False
+        print("Venta ejecutada correctamente.")
 
 
 if __name__ == '__main__':
