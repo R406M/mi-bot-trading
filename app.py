@@ -18,15 +18,6 @@ trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()
 user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Nuevo cliente
 
-# Función para obtener balance
-def get_balance(currency):
-    """Obtener balance de una moneda específica."""
-    accounts = user_client.get_accounts()
-    for account in accounts:
-        if account['currency'] == currency and account['type'] == 'trade':
-            return float(account['balance'])
-    return 0.0
-
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
 TAKE_PROFIT = 0.2  # Ganancia fija en USDT
@@ -36,6 +27,14 @@ STOP_LOSS = 10.0   # Pérdida fija en USDT
 operation_in_progress = False
 current_order = {}  # Almacenar información de la orden activa
 
+# Función para obtener balance
+def get_balance(currency):
+    """Obtener balance de una moneda específica."""
+    accounts = user_client.get_accounts()
+    for account in accounts:
+        if account['currency'] == currency and account['type'] == 'trade':
+            return float(account['balance'])
+    return 0.0
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -85,15 +84,6 @@ def webhook():
     except Exception as e:
         print(f"Error en el webhook: {e}")
         return jsonify({"error": "Error interno en el servidor"}), 500
-
-
-def get_balance(currency):
-    """Obtener balance de una moneda específica."""
-    accounts = trade_client.get_accounts()
-    for account in accounts:
-        if account['currency'] == currency and account['type'] == 'trade':
-            return float(account['balance'])
-    return 0.0
 
 
 def execute_trade(action):
