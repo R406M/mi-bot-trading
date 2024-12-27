@@ -1,14 +1,14 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market
+from kucoin.client import Trade, Market, User
 import os
 import threading
 import time
 
 # Configuración del bot
 app = Flask(__name__)
-SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "ROSE")  # Configurado en las variables de entorno
+SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "ROSE")
 
-# Credenciales de la API de KuCoin (cargar desde variables de entorno)
+# Credenciales de la API de KuCoin
 API_KEY = os.getenv("KUCOIN_API_KEY")
 API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
 API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
@@ -16,6 +16,16 @@ API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 # Conexión a los clientes de KuCoin
 trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()
+user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Nuevo cliente
+
+# Función para obtener balance
+def get_balance(currency):
+    """Obtener balance de una moneda específica."""
+    accounts = user_client.get_accounts()
+    for account in accounts:
+        if account['currency'] == currency and account['type'] == 'trade':
+            return float(account['balance'])
+    return 0.0
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
