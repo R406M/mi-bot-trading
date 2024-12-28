@@ -129,16 +129,18 @@ def get_balance(currency):
 def get_min_increment(order_type):
     """Obtener el incremento mínimo permitido para la operación de compra o venta."""
     try:
-        symbol_details = market_client.get_symbol(SYMBOL)
-        increment = None
+        symbol_details = market_client.get_symbols_details(SYMBOL)  # Método correcto para obtener detalles del par
+        min_increment = None
 
-        if order_type == "buy":
-            increment = symbol_details['buyIncrement']
-        elif order_type == "sell":
-            increment = symbol_details['sellIncrement']
-
-        app.logger.info(f"Incremento mínimo para {order_type}: {increment}")
-        return increment
+        for symbol in symbol_details:
+            if symbol['symbol'] == SYMBOL:
+                if order_type == "buy":
+                    min_increment = symbol.get('buyIncrement', 0.01)  # Valor por defecto
+                elif order_type == "sell":
+                    min_increment = symbol.get('sellIncrement', 0.01)  # Valor por defecto
+        
+        app.logger.info(f"Incremento mínimo para {order_type}: {min_increment}")
+        return min_increment
 
     except Exception as e:
         app.logger.error(f"Error obteniendo incremento mínimo para {order_type}: {e}")
