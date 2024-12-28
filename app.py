@@ -1,31 +1,28 @@
-from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market, User
-import os
 import threading
 import time
+from kucoin.client import User, Trade, Market
 
-app = Flask(__name__)
-SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "ROSE")
+# Configuración de la API de KuCoin
+API_KEY = 'TU_API_KEY'
+API_SECRET = 'TU_API_SECRET'
+API_PASSPHRASE = 'TU_API_PASSPHRASE'
+SYMBOL = 'DOGE-USDT'
+TAKE_PROFIT = 0.01  # Ejemplo: 1 centavo por encima del precio actual
+STOP_LOSS = 0.01   # Ejemplo: 1 centavo por debajo del precio actual
 
-API_KEY = os.getenv("KUCOIN_API_KEY")
-API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
-API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
-
-trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
+# Clientes de la API
+user_client = User(API_KEY, API_SECRET, API_PASSPHRASE)
+trade_client = Trade(API_KEY, API_SECRET, API_PASSPHRASE)
 market_client = Market()
-user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 
-SYMBOL = "DOGE-USDT"
-TAKE_PROFIT = 0.2
-STOP_LOSS = 10.0
-
+# Variables globales
 operation_in_progress = False
 current_order = {}
 
 def get_balance(currency):
     """Obtener balance de una moneda específica."""
     try:
-        accounts = user_client.get_accounts()
+        accounts = user_client.get_account_list()
         for account in accounts:
             if account['currency'] == currency and account['type'] == 'trade':
                 return float(account['balance'])
@@ -34,36 +31,33 @@ def get_balance(currency):
         print(f"Error obteniendo balance para {currency}: {e}")
         return 0.0
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    global operation_in_progress, current_order
+def monitor_price():
+    """Monitorea el precio del mercado para tomar decisiones según la orden actual."""
+    global operation_in_progress
     try:
-        data = request.get_json()
-        print(f"Datos recibidos: {data}")
+        while operation_in_progress:
+            ticker = market_client.get_ticker(SYMBOL)
+            current_price = float(ticker['price'])
+            print(f"Precio actual monitoreado: {current_price}")
 
-        if not data or data.get('token') != SECRET_TOKEN:
-            return jsonify({"error": "Token inválido o datos faltantes"}), 403
+            if current_order.get('side') == 'buy' and current_price >= current_order.get('tp_price', float('inf')):
+                print("Take Profit alcanzado. Ejecutando venta...")
+                execute_trade('sell')
+                break
 
-        action = data.get('action')
-        amount = float(data.get('amount', 0))
+            elif current_order.get('side') == 'sell' and current_price <= current_order.get('tp_price', float('-inf')):
+                print("Take Profit alcanzado. Ejecutando compra...")
+                execute_trade('buy')
+                break
 
-        if action not in ["buy", "sell"] or amount <= 0:
-            return jsonify({"error": "Acción o cantidad inválida"}), 400
-
-        if operation_in_progress:
-            print("Cerrando operación anterior...")
-            close_operation()
-
-        operation_in_progress = True
-        threading.Thread(target=execute_trade, args=(action,)).start()
-
-        return jsonify({"status": "success", "message": f"Señal {action} recibida y procesada"}), 200
-
+            time.sleep(5)  # Esperar antes de verificar nuevamente
     except Exception as e:
-        print(f"Error en el webhook: {e}")
-        return jsonify({"error": "Error interno del servidor"}), 500
+        print(f"Error monitoreando el precio: {e}")
+    finally:
+        operation_in_progress = False
 
 def execute_trade(action):
+    """Ejecuta una operación de compra o venta."""
     global operation_in_progress, current_order
     try:
         ticker = market_client.get_ticker(SYMBOL)
@@ -96,45 +90,24 @@ def execute_trade(action):
             else:
                 print("Saldo insuficiente de DOGE.")
 
+        print(f"Orden actualizada: {current_order}")
+        operation_in_progress = True
         threading.Thread(target=monitor_price).start()
 
     except Exception as e:
         print(f"Error ejecutando la operación: {e}")
         operation_in_progress = False
 
-def monitor_price():
-    global operation_in_progress, current_order
-    try:
-        while operation_in_progress:
-            ticker = market_client.get_ticker(SYMBOL)
-            current_price = float(ticker['price'])
-            print(f"Precio actual monitoreado: {current_price}")
-
-            if current_order['side'] == "buy" and (current_price >= current_order['tp_price'] or current_price <= current_order['sl_price']):
-                close_operation()
-            elif current_order['side'] == "sell" and (current_price <= current_order['tp_price'] or current_price >= current_order['sl_price']):
-                close_operation()
-            time.sleep(5)
-    except Exception as e:
-        print(f"Error monitoreando el precio: {e}")
-        operation_in_progress = False
-
-def close_operation():
+def webhook_listener(data):
+    """Procesa las señales recibidas por webhook."""
     global operation_in_progress
-    try:
-        if current_order['side'] == "buy":
-            sell_all()
-        elif current_order['side'] == "sell":
-            print("Operación de venta completada.")
-        operation_in_progress = False
-    except Exception as e:
-        print(f"Error cerrando la operación: {e}")
+    action = data.get('action')
 
-def sell_all():
-    doge_balance = get_balance("DOGE")
-    if doge_balance > 0:
-        trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
-        print("Venta ejecutada correctamente.")
+    if action in ["buy", "sell"] and not operation_in_progress:
+        execute_trade(action)
+    else:
+        print("Operación en curso o acción inválida.")
 
-if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
+# Simulación de recepción de webhook para pruebas
+data = {"action": "buy"}  # Ejemplo de señal de compra
+webhook_listener(data)
