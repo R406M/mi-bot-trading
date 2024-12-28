@@ -62,7 +62,8 @@ def webhook():
             if usdt_balance > 0:
                 # Obtener el incremento mínimo para la compra
                 min_increment = get_min_increment("buy")
-                adjusted_amount = round(usdt_balance / current_price, 2)  # Ajustar la cantidad de DOGE a comprar
+                # Ajustar la cantidad de DOGE a comprar
+                adjusted_amount = round(usdt_balance / current_price, 2)
                 if adjusted_amount % min_increment != 0:
                     adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
 
@@ -81,7 +82,8 @@ def webhook():
             if doge_balance > 0:
                 # Obtener el incremento mínimo para la venta
                 min_increment = get_min_increment("sell")
-                adjusted_amount = round(doge_balance, 2)  # Ajustar la cantidad de DOGE a vender
+                # Ajustar la cantidad de DOGE a vender
+                adjusted_amount = round(doge_balance, 2)
                 if adjusted_amount % min_increment != 0:
                     adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
 
@@ -129,15 +131,17 @@ def get_balance(currency):
 def get_min_increment(order_type):
     """Obtener el incremento mínimo permitido para la operación de compra o venta."""
     try:
-        symbol_details = market_client.get_symbols_details(SYMBOL)  # Método correcto para obtener detalles del par
-        min_increment = None
+        # Obtener detalles del símbolo del par de mercado
+        symbol_details = market_client.get_symbol_details(SYMBOL)
+        min_increment = 0.01  # Valor predeterminado del incremento mínimo
 
-        for symbol in symbol_details:
-            if symbol['symbol'] == SYMBOL:
-                if order_type == "buy":
-                    min_increment = symbol.get('buyIncrement', 0.01)  # Valor por defecto
-                elif order_type == "sell":
-                    min_increment = symbol.get('sellIncrement', 0.01)  # Valor por defecto
+        if symbol_details and 'data' in symbol_details:
+            for detail in symbol_details['data']:
+                if detail['symbol'] == SYMBOL:
+                    if order_type == "buy":
+                        min_increment = float(detail['buyIncrement'])
+                    elif order_type == "sell":
+                        min_increment = float(detail['sellIncrement'])
         
         app.logger.info(f"Incremento mínimo para {order_type}: {min_increment}")
         return min_increment
