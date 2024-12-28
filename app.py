@@ -41,11 +41,11 @@ def webhook():
         return jsonify({"error": "Token inválido"}), 403
 
     action = data.get('action')
-    amount = float(data.get('amount', 0))
-
-    if not action or amount <= 0:
-        app.logger.error("Datos incompletos o inválidos en la señal.")
-        return jsonify({"error": "Datos incompletos"}), 400
+    
+    # Ignorar 'amount' si es un valor irrelevante
+    if action not in ['buy', 'sell']:
+        app.logger.error("Acción inválida recibida.")
+        return jsonify({"error": "Acción inválida"}), 400
 
     # Si hay una operación en curso, rechazar nuevas señales
     if operation_in_progress:
