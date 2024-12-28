@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market
+from kucoin.client import Trade, Market, User  # Asegúrate de importar User
 import os
 import threading
 import time
@@ -16,6 +16,7 @@ API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 # Conexión a los clientes de KuCoin
 trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()
+user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Cliente para obtener balances
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
@@ -100,9 +101,9 @@ def webhook():
 
 
 def get_balance(currency):
-    """Obtener balance de una moneda específica."""
+    """Obtener balance de una moneda específica utilizando el cliente User."""
     try:
-        accounts = trade_client.get_accounts()
+        accounts = user_client.get_account_list()
         for account in accounts:
             if account['currency'] == currency and account['type'] == 'trade':
                 balance = float(account['balance'])
