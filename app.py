@@ -58,16 +58,15 @@ def webhook():
         app.logger.info(f"Precio actual del mercado para {SYMBOL}: {current_price}")
 
         if action == "buy":
-            usdt_balance = get_balance("USDT")
+            usdt_balance = get_balance("USDT") * 0.98  # Usar solo el 98% del saldo USDT
             if usdt_balance > 0:
                 # Obtener el incremento mínimo para la compra
                 min_increment = get_min_increment("buy")
                 # Ajustar la cantidad de DOGE a comprar
-                adjusted_amount = round(usdt_balance / current_price, 2)
-                if adjusted_amount % min_increment != 0:
-                    adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
+                adjusted_amount = usdt_balance / current_price
+                adjusted_amount = adjust_to_increment(adjusted_amount, min_increment)
 
-                response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
+                response = trade_client.create_market_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
                     "side": "buy",
@@ -78,14 +77,12 @@ def webhook():
                 raise Exception("Saldo insuficiente de USDT")
 
         elif action == "sell":
-            doge_balance = get_balance("DOGE")
+            doge_balance = get_balance("DOGE") * 0.98  # Usar solo el 98% del saldo DOGE
             if doge_balance > 0:
                 # Obtener el incremento mínimo para la venta
                 min_increment = get_min_increment("sell")
                 # Ajustar la cantidad de DOGE a vender
-                adjusted_amount = round(doge_balance, 2)
-                if adjusted_amount % min_increment != 0:
-                    adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
+                adjusted_amount = adjust_to_increment(doge_balance, min_increment)
 
                 response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
                 app.logger.info(f"Venta ejecutada: {response}")
@@ -116,7 +113,7 @@ def webhook():
 def get_balance(currency):
     """Obtener balance de una moneda específica utilizando el cliente User."""
     try:
-        accounts = user_client.get_account_list()  # Se corrige para usar el cliente `User`
+        accounts = user_client.get_account_list()
         for account in accounts:
             if account['currency'] == currency and account['type'] == 'trade':
                 balance = float(account['balance'])
@@ -131,24 +128,19 @@ def get_balance(currency):
 def get_min_increment(order_type):
     """Obtener el incremento mínimo permitido para la operación de compra o venta."""
     try:
-        # Obtener detalles del símbolo del par de mercado
-        symbol_details = market_client.get_symbol_details(SYMBOL)
-        min_increment = 0.01  # Valor predeterminado del incremento mínimo
-
-        if symbol_details and 'data' in symbol_details:
-            for detail in symbol_details['data']:
-                if detail['symbol'] == SYMBOL:
-                    if order_type == "buy":
-                        min_increment = float(detail['buyIncrement'])
-                    elif order_type == "sell":
-                        min_increment = float(detail['sellIncrement'])
-        
-        app.logger.info(f"Incremento mínimo para {order_type}: {min_increment}")
-        return min_increment
-
+        symbol_details = market_client.get_symbol_list()
+        for detail in symbol_details:
+            if detail['symbol'] == SYMBOL:
+                return float(detail['baseIncrement'])
+        return 0.01
     except Exception as e:
         app.logger.error(f"Error obteniendo incremento mínimo para {order_type}: {e}")
-        return 0.01  # Valor de incremento mínimo por defecto
+        return 0.01
+
+
+def adjust_to_increment(value, increment):
+    """Ajustar un valor al múltiplo más cercano del incremento dado."""
+    return increment * int(value / increment)
 
 
 def monitor_price():
@@ -176,7 +168,7 @@ def monitor_price():
                     app.logger.info("Stop Loss alcanzado.")
                     operation_in_progress = False
 
-            time.sleep(5)  # Revisar cada 5 segundos
+            time.sleep(5)
 
         except Exception as e:
             app.logger.error(f"Error monitoreando el precio: {e}")
@@ -186,20 +178,10 @@ def monitor_price():
 def sell_all():
     """Función para vender todo el DOGE en caso de TP o SL."""
     global operation_in_progress
-    doge_balance = get_balance("DOGE")
+    doge_balance = get_balance("DOGE") * 0.98
     if doge_balance > 0:
         response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
         app.logger.info(f"Orden de venta ejecutada: {response}")
-    operation_in_progress = False
-
-
-def buy_all():
-    """Función para comprar todo el saldo en USDT en DOGE."""
-    global operation_in_progress
-    usdt_balance = get_balance("USDT")
-    if usdt_balance > 0:
-        response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
-        app.logger.info(f"Compra ejecutada: {response}")
     operation_in_progress = False
 
 
