@@ -157,5 +157,15 @@ def sell_all():
     operation_in_progress = False
 
 
+def buy_all():
+    """Función para comprar todo el saldo en USDT en DOGE."""
+    global operation_in_progress
+    usdt_balance = get_balance("USDT")
+    if usdt_balance > 0:
+        response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
+        app.logger.info(f"Compra ejecutada: {response}")
+    operation_in_progress = False
+
+
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
