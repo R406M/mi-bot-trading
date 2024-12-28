@@ -20,8 +20,8 @@ user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
-TAKE_PROFIT = 0.2  # Ganancia fija (USDT)
-STOP_LOSS = 10.0   # Pérdida fija (USDT)
+TAKE_PROFIT_PERCENT = 2.0  # Porcentaje de ganancia
+STOP_LOSS_PERCENT = 1.0    # Porcentaje de pérdida
 
 # Estado del bot
 operation_in_progress = False
@@ -70,8 +70,8 @@ def webhook():
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
                     "side": "buy",
-                    "tp_price": current_price + TAKE_PROFIT,
-                    "sl_price": current_price - STOP_LOSS
+                    "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT / 100),
+                    "sl_price": current_price * (1 - STOP_LOSS_PERCENT / 100)
                 })
             else:
                 raise Exception("Saldo insuficiente de USDT")
@@ -88,8 +88,8 @@ def webhook():
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
-                    "tp_price": current_price - TAKE_PROFIT,
-                    "sl_price": current_price + STOP_LOSS
+                    "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT / 100),
+                    "sl_price": current_price * (1 + STOP_LOSS_PERCENT / 100)
                 })
             else:
                 raise Exception("Saldo insuficiente de DOGE")
