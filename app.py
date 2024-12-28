@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from kucoin.client import Trade, Market, User  # Asegúrate de importar User
+from kucoin.client import Trade, Market, User
 import os
 import threading
 import time
@@ -16,7 +16,7 @@ API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 # Conexión a los clientes de KuCoin
 trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()
-user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)  # Cliente para obtener balances
+user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
@@ -42,7 +42,6 @@ def webhook():
 
     action = data.get('action')
     
-    # Ignorar 'amount' si es un valor irrelevante
     if action not in ['buy', 'sell']:
         app.logger.error("Acción inválida recibida.")
         return jsonify({"error": "Acción inválida"}), 400
@@ -61,6 +60,12 @@ def webhook():
         if action == "buy":
             usdt_balance = get_balance("USDT")
             if usdt_balance > 0:
+                # Obtener el incremento mínimo para la compra
+                min_increment = get_min_increment("buy")
+                adjusted_amount = round(usdt_balance / current_price, 2)  # Ajustar la cantidad de DOGE a comprar
+                if adjusted_amount % min_increment != 0:
+                    adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
+
                 response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
@@ -74,7 +79,13 @@ def webhook():
         elif action == "sell":
             doge_balance = get_balance("DOGE")
             if doge_balance > 0:
-                response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
+                # Obtener el incremento mínimo para la venta
+                min_increment = get_min_increment("sell")
+                adjusted_amount = round(doge_balance, 2)  # Ajustar la cantidad de DOGE a vender
+                if adjusted_amount % min_increment != 0:
+                    adjusted_amount = min_increment * int(adjusted_amount / min_increment)  # Ajustar al múltiplo más cercano
+
+                response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
@@ -113,6 +124,25 @@ def get_balance(currency):
     except Exception as e:
         app.logger.error(f"Error obteniendo balance para {currency}: {e}")
         return 0.0
+
+
+def get_min_increment(order_type):
+    """Obtener el incremento mínimo permitido para la operación de compra o venta."""
+    try:
+        symbol_details = market_client.get_symbol(SYMBOL)
+        increment = None
+
+        if order_type == "buy":
+            increment = symbol_details['buyIncrement']
+        elif order_type == "sell":
+            increment = symbol_details['sellIncrement']
+
+        app.logger.info(f"Incremento mínimo para {order_type}: {increment}")
+        return increment
+
+    except Exception as e:
+        app.logger.error(f"Error obteniendo incremento mínimo para {order_type}: {e}")
+        return 0.01  # Valor de incremento mínimo por defecto
 
 
 def monitor_price():
