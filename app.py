@@ -20,8 +20,8 @@ user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
-TAKE_PROFIT_PERCENT = 2.0  # Porcentaje de ganancia
-STOP_LOSS_PERCENT = 1.0    # Porcentaje de pérdida
+TAKE_PROFIT_PERCENT = 0.02  # Porcentaje de ganancia
+STOP_LOSS_PERCENT = 0.3    # Porcentaje de pérdida
 
 # Estado del bot
 operation_in_progress = False
@@ -41,7 +41,7 @@ def webhook():
         return jsonify({"error": "Token inválido"}), 403
 
     action = data.get('action')
-    
+
     if action not in ['buy', 'sell']:
         app.logger.error("Acción inválida recibida.")
         return jsonify({"error": "Acción inválida"}), 400
@@ -60,9 +60,7 @@ def webhook():
         if action == "buy":
             usdt_balance = get_balance("USDT") * 0.98  # Usar solo el 98% del saldo USDT
             if usdt_balance > 0:
-                # Obtener el incremento mínimo para la compra
                 min_increment = get_min_increment("buy")
-                # Ajustar la cantidad de DOGE a comprar
                 adjusted_amount = usdt_balance / current_price
                 adjusted_amount = adjust_to_increment(adjusted_amount, min_increment)
 
@@ -70,8 +68,8 @@ def webhook():
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
                     "side": "buy",
-                    "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT / 100),
-                    "sl_price": current_price * (1 - STOP_LOSS_PERCENT / 100)
+                    "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT),
+                    "sl_price": current_price * (1 - STOP_LOSS_PERCENT)
                 })
             else:
                 raise Exception("Saldo insuficiente de USDT")
@@ -79,17 +77,15 @@ def webhook():
         elif action == "sell":
             doge_balance = get_balance("DOGE") * 0.98  # Usar solo el 98% del saldo DOGE
             if doge_balance > 0:
-                # Obtener el incremento mínimo para la venta
                 min_increment = get_min_increment("sell")
-                # Ajustar la cantidad de DOGE a vender
                 adjusted_amount = adjust_to_increment(doge_balance, min_increment)
 
                 response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
-                    "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT / 100),
-                    "sl_price": current_price * (1 + STOP_LOSS_PERCENT / 100)
+                    "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT),
+                    "sl_price": current_price * (1 + STOP_LOSS_PERCENT)
                 })
             else:
                 raise Exception("Saldo insuficiente de DOGE")
@@ -108,6 +104,7 @@ def webhook():
         app.logger.error(f"Error procesando la señal: {e}")
         operation_in_progress = False
         return jsonify({"error": str(e)}), 500
+
 
 
 def get_balance(currency):
