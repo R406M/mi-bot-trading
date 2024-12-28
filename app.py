@@ -1,113 +1,160 @@
+from flask import Flask, request, jsonify
+from kucoin.client import Trade, Market
+import os
 import threading
 import time
-from kucoin.client import User, Trade, Market
 
-# Configuración de la API de KuCoin
-API_KEY = 'TU_API_KEY'
-API_SECRET = 'TU_API_SECRET'
-API_PASSPHRASE = 'TU_API_PASSPHRASE'
-SYMBOL = 'DOGE-USDT'
-TAKE_PROFIT = 0.01  # Ejemplo: 1 centavo por encima del precio actual
-STOP_LOSS = 0.01   # Ejemplo: 1 centavo por debajo del precio actual
+# Configuración del bot
+app = Flask(__name__)
+SECRET_TOKEN = os.getenv("WEBHOOK_SECRET", "ROSE")  # Configurado en las variables de entorno
 
-# Clientes de la API
-user_client = User(API_KEY, API_SECRET, API_PASSPHRASE)
-trade_client = Trade(API_KEY, API_SECRET, API_PASSPHRASE)
+# Credenciales de la API de KuCoin (cargar desde variables de entorno)
+API_KEY = os.getenv("KUCOIN_API_KEY")
+API_SECRET = os.getenv("KUCOIN_SECRET_KEY")
+API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
+
+# Conexión a los clientes de KuCoin
+trade_client = Trade(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 market_client = Market()
 
-# Variables globales
+# Configuración fija
+SYMBOL = "DOGE-USDT"  # Par de trading
+TAKE_PROFIT = 0.2  # Ganancia fija (USDT)
+STOP_LOSS = 10.0   # Pérdida fija (USDT)
+
+# Estado del bot
 operation_in_progress = False
-current_order = {}
+current_order = {}  # Almacenar información de la orden activa
 
-def get_balance(currency):
-    """Obtener balance de una moneda específica."""
-    try:
-        accounts = user_client.get_account_list()
-        for account in accounts:
-            if account['currency'] == currency and account['type'] == 'trade':
-                return float(account['balance'])
-        return 0.0
-    except Exception as e:
-        print(f"Error obteniendo balance para {currency}: {e}")
-        return 0.0
 
-def monitor_price():
-    """Monitorea el precio del mercado para tomar decisiones según la orden actual."""
-    global operation_in_progress
-    try:
-        while operation_in_progress:
-            ticker = market_client.get_ticker(SYMBOL)
-            current_price = float(ticker['price'])
-            print(f"Precio actual monitoreado: {current_price}")
-
-            if current_order.get('side') == 'buy' and current_price >= current_order.get('tp_price', float('inf')):
-                print("Take Profit alcanzado. Ejecutando venta...")
-                execute_trade('sell')
-                break
-
-            elif current_order.get('side') == 'sell' and current_price <= current_order.get('tp_price', float('-inf')):
-                print("Take Profit alcanzado. Ejecutando compra...")
-                execute_trade('buy')
-                break
-
-            time.sleep(5)  # Esperar antes de verificar nuevamente
-    except Exception as e:
-        print(f"Error monitoreando el precio: {e}")
-    finally:
-        operation_in_progress = False
-
-def execute_trade(action):
-    """Ejecuta una operación de compra o venta."""
+@app.route('/webhook', methods=['POST'])
+def webhook():
     global operation_in_progress, current_order
+
+    # Recibir y validar la señal desde TradingView
+    data = request.get_json()
+    app.logger.info(f"Datos recibidos: {data}")
+
+    if not data or data.get('token') != SECRET_TOKEN:
+        app.logger.error("Token inválido recibido.")
+        return jsonify({"error": "Token inválido"}), 403
+
+    action = data.get('action')
+    amount = float(data.get('amount', 0))
+
+    if not action or amount <= 0:
+        app.logger.error("Datos incompletos o inválidos en la señal.")
+        return jsonify({"error": "Datos incompletos"}), 400
+
+    # Si hay una operación en curso, rechazar nuevas señales
+    if operation_in_progress:
+        app.logger.warning("Operación en curso, señal rechazada.")
+        return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
+
     try:
+        operation_in_progress = True
         ticker = market_client.get_ticker(SYMBOL)
         current_price = float(ticker['price'])
-        print(f"Precio actual del mercado para {SYMBOL}: {current_price}")
+        app.logger.info(f"Precio actual del mercado para {SYMBOL}: {current_price}")
 
         if action == "buy":
             usdt_balance = get_balance("USDT")
             if usdt_balance > 0:
                 response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
-                print(f"Compra ejecutada: {response}")
+                app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
                     "side": "buy",
                     "tp_price": current_price + TAKE_PROFIT,
                     "sl_price": current_price - STOP_LOSS
                 })
             else:
-                print("Saldo insuficiente de USDT.")
+                raise Exception("Saldo insuficiente de USDT")
 
         elif action == "sell":
             doge_balance = get_balance("DOGE")
             if doge_balance > 0:
                 response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
-                print(f"Venta ejecutada: {response}")
+                app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
                     "tp_price": current_price - TAKE_PROFIT,
                     "sl_price": current_price + STOP_LOSS
                 })
             else:
-                print("Saldo insuficiente de DOGE.")
+                raise Exception("Saldo insuficiente de DOGE")
 
-        print(f"Orden actualizada: {current_order}")
-        operation_in_progress = True
+        # Iniciar monitoreo para TP/SL en un hilo separado
         threading.Thread(target=monitor_price).start()
 
+        return jsonify({
+            "status": "success",
+            "message": f"Orden {action} ejecutada",
+            "tp_price": current_order['tp_price'],
+            "sl_price": current_order['sl_price']
+        }), 200
+
     except Exception as e:
-        print(f"Error ejecutando la operación: {e}")
+        app.logger.error(f"Error procesando la señal: {e}")
         operation_in_progress = False
+        return jsonify({"error": str(e)}), 500
 
-def webhook_listener(data):
-    """Procesa las señales recibidas por webhook."""
+
+def get_balance(currency):
+    """Obtener balance de una moneda específica."""
+    try:
+        accounts = trade_client.get_accounts()
+        for account in accounts:
+            if account['currency'] == currency and account['type'] == 'trade':
+                balance = float(account['balance'])
+                app.logger.info(f"Saldo {currency}: {balance}")
+                return balance
+        return 0.0
+    except Exception as e:
+        app.logger.error(f"Error obteniendo balance para {currency}: {e}")
+        return 0.0
+
+
+def monitor_price():
+    """Monitorear el precio para cerrar posiciones con TP o SL."""
+    global operation_in_progress, current_order
+
+    while operation_in_progress:
+        try:
+            ticker = market_client.get_ticker(SYMBOL)
+            current_price = float(ticker['price'])
+            app.logger.info(f"Precio actual monitoreado: {current_price}")
+
+            if current_order['side'] == "buy":
+                if current_price >= current_order['tp_price']:
+                    sell_all()
+                    app.logger.info("Take Profit alcanzado.")
+                elif current_price <= current_order['sl_price']:
+                    sell_all()
+                    app.logger.info("Stop Loss alcanzado.")
+            elif current_order['side'] == "sell":
+                if current_price <= current_order['tp_price']:
+                    app.logger.info("Take Profit alcanzado.")
+                    operation_in_progress = False
+                elif current_price >= current_order['sl_price']:
+                    app.logger.info("Stop Loss alcanzado.")
+                    operation_in_progress = False
+
+            time.sleep(5)  # Revisar cada 5 segundos
+
+        except Exception as e:
+            app.logger.error(f"Error monitoreando el precio: {e}")
+            operation_in_progress = False
+
+
+def sell_all():
+    """Función para vender todo el DOGE en caso de TP o SL."""
     global operation_in_progress
-    action = data.get('action')
+    doge_balance = get_balance("DOGE")
+    if doge_balance > 0:
+        response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
+        app.logger.info(f"Orden de venta ejecutada: {response}")
+    operation_in_progress = False
 
-    if action in ["buy", "sell"] and not operation_in_progress:
-        execute_trade(action)
-    else:
-        print("Operación en curso o acción inválida.")
 
-# Simulación de recepción de webhook para pruebas
-data = {"action": "buy"}  # Ejemplo de señal de compra
-webhook_listener(data)
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
