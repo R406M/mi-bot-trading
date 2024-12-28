@@ -103,7 +103,7 @@ def webhook():
 def get_balance(currency):
     """Obtener balance de una moneda específica utilizando el cliente User."""
     try:
-        accounts = user_client.get_account_list()
+        accounts = user_client.get_account_list()  # Se corrige para usar el cliente `User`
         for account in accounts:
             if account['currency'] == currency and account['type'] == 'trade':
                 balance = float(account['balance'])
