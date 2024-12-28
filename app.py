@@ -27,15 +27,6 @@ STOP_LOSS = 10.0   # Pérdida fija en USDT
 operation_in_progress = False
 current_order = {}  # Almacenar información de la orden activa
 
-# Función para obtener balance
-def get_balance(currency):
-    """Obtener balance de una moneda específica."""
-    accounts = user_client.get_accounts()
-    for account in accounts:
-        if account['currency'] == currency and account['type'] == 'trade':
-            return float(account['balance'])
-    return 0.0
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     global operation_in_progress, current_order
@@ -85,6 +76,16 @@ def webhook():
         print(f"Error en el webhook: {e}")
         return jsonify({"error": "Error interno en el servidor"}), 500
 
+def get_balance(currency):
+    """Obtener balance de una moneda específica."""
+    try:
+        accounts = trade_client.get_accounts()
+        for account in accounts:
+            if account['currency'] == currency and account['type'] == 'trade':
+                return float(account['balance'])
+    except Exception as e:
+        print(f"Error obteniendo balance para {currency}: {e}")
+    return 0.0
 
 def execute_trade(action):
     """Ejecutar la operación de compra o venta."""
@@ -93,32 +94,35 @@ def execute_trade(action):
     try:
         ticker = market_client.get_ticker(SYMBOL)
         current_price = float(ticker['price'])
+        print(f"Precio actual del mercado para {SYMBOL}: {current_price}")
 
         if action == "buy":
             usdt_balance = get_balance("USDT")
+            print(f"Saldo USDT disponible: {usdt_balance}")
             if usdt_balance > 0:
                 response = trade_client.create_market_order(SYMBOL, "buy", funds=usdt_balance)
-                print(f"Compra ejecutada: {response}")
+                print(f"Respuesta de la API para la compra: {response}")
                 current_order.update({
                     "side": "buy",
                     "tp_price": current_price + TAKE_PROFIT,
                     "sl_price": current_price - STOP_LOSS
                 })
             else:
-                raise Exception("Saldo insuficiente de USDT")
+                print("Saldo insuficiente de USDT.")
 
         elif action == "sell":
             doge_balance = get_balance("DOGE")
+            print(f"Saldo DOGE disponible: {doge_balance}")
             if doge_balance > 0:
                 response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
-                print(f"Venta ejecutada: {response}")
+                print(f"Respuesta de la API para la venta: {response}")
                 current_order.update({
                     "side": "sell",
                     "tp_price": current_price - TAKE_PROFIT,
                     "sl_price": current_price + STOP_LOSS
                 })
             else:
-                raise Exception("Saldo insuficiente de DOGE")
+                print("Saldo insuficiente de DOGE.")
 
         # Monitorear TP/SL en un hilo separado
         threading.Thread(target=monitor_price).start()
@@ -126,7 +130,6 @@ def execute_trade(action):
     except Exception as e:
         print(f"Error ejecutando la operación: {e}")
         operation_in_progress = False
-
 
 def monitor_price():
     """Monitorear el precio para cerrar posiciones con TP o SL."""
@@ -136,6 +139,7 @@ def monitor_price():
         try:
             ticker = market_client.get_ticker(SYMBOL)
             current_price = float(ticker['price'])
+            print(f"Precio actual monitoreado: {current_price}")
 
             if current_order['side'] == "buy":
                 if current_price >= current_order['tp_price'] or current_price <= current_order['sl_price']:
@@ -152,7 +156,6 @@ def monitor_price():
             print(f"Error monitoreando el precio: {e}")
             operation_in_progress = False
 
-
 def close_operation():
     """Cerrar cualquier operación activa."""
     global operation_in_progress
@@ -167,14 +170,13 @@ def close_operation():
     except Exception as e:
         print(f"Error cerrando la operación: {e}")
 
-
 def sell_all():
     """Vender todo el DOGE en caso de TP, SL o nueva señal."""
     doge_balance = get_balance("DOGE")
     if doge_balance > 0:
-        trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
+        response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
+        print(f"Respuesta de la API para vender todo el DOGE: {response}")
         print("Venta ejecutada correctamente.")
-
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
