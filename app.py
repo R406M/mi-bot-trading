@@ -27,7 +27,6 @@ STOP_LOSS_PERCENT = 0.3    # Porcentaje de pérdida
 operation_in_progress = False
 current_order = {}  # Almacenar información de la orden activa
 
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     global operation_in_progress, current_order
@@ -111,39 +110,6 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 
-def get_balance(currency):
-    """Obtener balance de una moneda específica utilizando el cliente User."""
-    try:
-        accounts = user_client.get_account_list()
-        for account in accounts:
-            if account['currency'] == currency and account['type'] == 'trade':
-                balance = float(account['balance'])
-                app.logger.info(f"Saldo {currency}: {balance}")
-                return balance
-        return 0.0
-    except Exception as e:
-        app.logger.error(f"Error obteniendo balance para {currency}: {e}")
-        return 0.0
-
-
-def get_min_increment(order_type):
-    """Obtener el incremento mínimo permitido para la operación de compra o venta."""
-    try:
-        symbol_details = market_client.get_symbol_list()
-        for detail in symbol_details:
-            if detail['symbol'] == SYMBOL:
-                return float(detail['baseIncrement'])
-        return 0.01
-    except Exception as e:
-        app.logger.error(f"Error obteniendo incremento mínimo para {order_type}: {e}")
-        return 0.01
-
-
-def adjust_to_increment(value, increment):
-    """Ajustar un valor al múltiplo más cercano del incremento dado."""
-    return increment * int(value / increment)
-
-
 def close_current_operation():
     """Cerrar la operación actual de manera segura."""
     global current_order, operation_in_progress
@@ -194,7 +160,6 @@ def monitor_price():
 
     operation_in_progress = False
     current_order.clear()
-
 
 def sell_all():
     """Función para vender todo el DOGE en caso de TP o SL."""
