@@ -46,7 +46,12 @@ def webhook():
         app.logger.error("Acción inválida recibida.")
         return jsonify({"error": "Acción inválida"}), 400
 
-    # Si hay una operación en curso, rechazar nuevas señales
+    # Verificar si una operación está en curso
+    if operation_in_progress and current_order.get('side') != action:
+        app.logger.warning("Operación en curso pero señal opuesta recibida, cerrando operación actual...")
+        close_current_operation()
+        operation_in_progress = False
+
     if operation_in_progress:
         app.logger.warning("Operación en curso, señal rechazada.")
         return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
@@ -106,7 +111,6 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 
-
 def get_balance(currency):
     """Obtener balance de una moneda específica utilizando el cliente User."""
     try:
@@ -140,6 +144,21 @@ def adjust_to_increment(value, increment):
     return increment * int(value / increment)
 
 
+def close_current_operation():
+    """Cerrar la operación actual de manera segura."""
+    global current_order, operation_in_progress
+    if current_order['side'] == "buy":
+        sell_all()
+        app.logger.info("Operación de compra cerrada manualmente.")
+    elif current_order['side'] == "sell":
+        doge_balance = get_balance("DOGE")
+        if doge_balance > 0:
+            sell_all()
+        app.logger.info("Operación de venta cerrada manualmente.")
+    operation_in_progress = False
+    current_order.clear()
+
+
 def monitor_price():
     """Monitorear el precio para cerrar posiciones con TP o SL."""
     global operation_in_progress, current_order
@@ -154,22 +173,27 @@ def monitor_price():
                 if current_price >= current_order['tp_price']:
                     sell_all()
                     app.logger.info("Take Profit alcanzado.")
+                    break
                 elif current_price <= current_order['sl_price']:
                     sell_all()
                     app.logger.info("Stop Loss alcanzado.")
+                    break
             elif current_order['side'] == "sell":
                 if current_price <= current_order['tp_price']:
                     app.logger.info("Take Profit alcanzado.")
-                    operation_in_progress = False
+                    break
                 elif current_price >= current_order['sl_price']:
                     app.logger.info("Stop Loss alcanzado.")
-                    operation_in_progress = False
+                    break
 
             time.sleep(5)
 
         except Exception as e:
             app.logger.error(f"Error monitoreando el precio: {e}")
-            operation_in_progress = False
+            break
+
+    operation_in_progress = False
+    current_order.clear()
 
 
 def sell_all():
