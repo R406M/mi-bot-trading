@@ -3,6 +3,7 @@ from kucoin.client import Trade, Market, User
 import os
 import threading
 import time
+import requests
 
 # Configuración del bot
 app = Flask(__name__)
@@ -57,18 +58,21 @@ def webhook():
 
     try:
         operation_in_progress = True
-        ticker = market_client.get_ticker(SYMBOL)
+        ticker = safe_get_ticker(SYMBOL)
+        if not ticker:
+            raise Exception("No se pudo obtener el ticker")
+        
         current_price = float(ticker['price'])
         app.logger.info(f"Precio actual del mercado para {SYMBOL}: {current_price}")
 
         if action == "buy":
-            usdt_balance = get_balance("USDT") * 0.85  # Usar solo el 85% del saldo USDT
+            usdt_balance = safe_get_balance("USDT") * 0.85  # Usar solo el 85% del saldo USDT
             if usdt_balance > 0:
                 min_increment = get_min_increment("buy")
                 adjusted_amount = usdt_balance / current_price
                 adjusted_amount = adjust_to_increment(adjusted_amount, min_increment)
 
-                response = trade_client.create_market_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
+                response = safe_create_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
                     "side": "buy",
@@ -79,12 +83,12 @@ def webhook():
                 raise Exception("Saldo insuficiente de USDT")
 
         elif action == "sell":
-            doge_balance = get_balance("DOGE") * 0.85  # Usar solo el 85% del saldo DOGE
+            doge_balance = safe_get_balance("DOGE") * 0.85  # Usar solo el 85% del saldo DOGE
             if doge_balance > 0:
                 min_increment = get_min_increment("sell")
                 adjusted_amount = adjust_to_increment(doge_balance, min_increment)
 
-                response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
+                response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
@@ -109,7 +113,6 @@ def webhook():
         operation_in_progress = False
         return jsonify({"error": str(e)}), 500
 
-
 def close_current_operation():
     """Cerrar la operación actual de manera segura."""
     global current_order, operation_in_progress
@@ -117,7 +120,7 @@ def close_current_operation():
         sell_all()
         app.logger.info("Operación de compra cerrada manualmente.")
     elif current_order['side'] == "sell":
-        doge_balance = get_balance("DOGE")
+        doge_balance = safe_get_balance("DOGE")
         if doge_balance > 0:
             sell_all()
         app.logger.info("Operación de venta cerrada manualmente.")
@@ -130,7 +133,9 @@ def monitor_price():
 
     while operation_in_progress:
         try:
-            ticker = market_client.get_ticker(SYMBOL)
+            ticker = safe_get_ticker(SYMBOL)
+            if not ticker:
+                break
             current_price = float(ticker['price'])
             app.logger.info(f"Precio actual monitoreado: {current_price}")
 
@@ -163,21 +168,53 @@ def monitor_price():
 def sell_all():
     """Función para vender todo el DOGE en caso de TP o SL."""
     global operation_in_progress
-    doge_balance = get_balance("DOGE") * 0.98
+    doge_balance = safe_get_balance("DOGE") * 0.98
     if doge_balance > 0:
-        response = trade_client.create_market_order(SYMBOL, "sell", size=round(doge_balance, 2))
+        response = safe_create_order(SYMBOL, "sell", size=round(doge_balance, 2))
         app.logger.info(f"Orden de venta ejecutada: {response}")
     operation_in_progress = False
 
-def get_balance(asset):
-    """Obtener el balance de un activo (USDT o DOGE)."""
-    if asset == "USDT":
-        balance = user_client.get_balance('USDT')
-        return float(balance['available'])
-    elif asset == "DOGE":
-        balance = user_client.get_balance('DOGE')
-        return float(balance['available'])
+def safe_get_balance(asset):
+    """Obtener el balance de un activo (USDT o DOGE) de forma segura."""
+    retries = 3
+    for i in range(retries):
+        try:
+            if asset == "USDT":
+                balance = user_client.get_balance('USDT')
+                return float(balance['available'])
+            elif asset == "DOGE":
+                balance = user_client.get_balance('DOGE')
+                return float(balance['available'])
+            return 0
+        except Exception as e:
+            app.logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
+            time.sleep(5)
     return 0
+
+def safe_get_ticker(symbol):
+    """Obtener el ticker de un símbolo de forma segura."""
+    retries = 3
+    for i in range(retries):
+        try:
+            return market_client.get_ticker(symbol)
+        except Exception as e:
+            app.logger.error(f"Error obteniendo ticker para {symbol}: ({i+1}/{retries}) {e}")
+            time.sleep(5)
+    return None
+
+def safe_create_order(symbol, side, **kwargs):
+    """Crear una orden de compra o venta de forma segura."""
+    retries = 3
+    for i in range(retries):
+        try:
+            if side == "buy":
+                return trade_client.create_market_order(symbol, side, funds=kwargs['funds'])
+            else:
+                return trade_client.create_market_order(symbol, side, size=kwargs['size'])
+        except Exception as e:
+            app.logger.error(f"Error creando orden {side} para {symbol}: ({i+1}/{retries}) {e}")
+            time.sleep(5)
+    return None
 
 def get_min_increment(action):
     """Obtener el incremento mínimo permitido por KuCoin para comprar/vender."""
