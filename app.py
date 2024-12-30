@@ -20,8 +20,8 @@ user_client = User(key=API_KEY, secret=API_SECRET, passphrase=API_PASSPHRASE)
 
 # Configuración fija
 SYMBOL = "DOGE-USDT"  # Par de trading
-TAKE_PROFIT_PERCENT = 0.02  # Porcentaje de ganancia
-STOP_LOSS_PERCENT = 0.3    # Porcentaje de pérdida
+TAKE_PROFIT_PERCENT = 0.2  # Porcentaje de ganancia
+STOP_LOSS_PERCENT = 0.5    # Porcentaje de pérdida
 
 # Estado del bot
 operation_in_progress = False
@@ -62,7 +62,7 @@ def webhook():
         app.logger.info(f"Precio actual del mercado para {SYMBOL}: {current_price}")
 
         if action == "buy":
-            usdt_balance = get_balance("USDT") * 0.98  # Usar solo el 98% del saldo USDT
+            usdt_balance = get_balance("USDT") * 0.85  # Usar solo el 85% del saldo USDT
             if usdt_balance > 0:
                 min_increment = get_min_increment("buy")
                 adjusted_amount = usdt_balance / current_price
@@ -79,7 +79,7 @@ def webhook():
                 raise Exception("Saldo insuficiente de USDT")
 
         elif action == "sell":
-            doge_balance = get_balance("DOGE") * 0.98  # Usar solo el 98% del saldo DOGE
+            doge_balance = get_balance("DOGE") * 0.85  # Usar solo el 85% del saldo DOGE
             if doge_balance > 0:
                 min_increment = get_min_increment("sell")
                 adjusted_amount = adjust_to_increment(doge_balance, min_increment)
