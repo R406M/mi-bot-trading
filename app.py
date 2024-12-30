@@ -49,6 +49,7 @@ def webhook():
     if operation_in_progress and current_order.get('side') != action:
         app.logger.warning("Operación en curso pero señal opuesta recibida, cerrando operación actual...")
         close_current_operation()
+        operation_in_progress = False
 
     if operation_in_progress:
         app.logger.warning("Operación en curso, señal rechazada.")
@@ -63,6 +64,10 @@ def webhook():
         if action == "buy":
             usdt_balance = get_balance("USDT") * 0.85  # Usar solo el 85% del saldo USDT
             if usdt_balance > 0:
+                min_increment = get_min_increment("buy")
+                adjusted_amount = usdt_balance / current_price
+                adjusted_amount = adjust_to_increment(adjusted_amount, min_increment)
+
                 response = trade_client.create_market_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
@@ -76,7 +81,10 @@ def webhook():
         elif action == "sell":
             doge_balance = get_balance("DOGE") * 0.85  # Usar solo el 85% del saldo DOGE
             if doge_balance > 0:
-                response = trade_client.create_market_order(SYMBOL, "sell", size=round(doge_balance, 2))
+                min_increment = get_min_increment("sell")
+                adjusted_amount = adjust_to_increment(doge_balance, min_increment)
+
+                response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
@@ -87,7 +95,7 @@ def webhook():
                 raise Exception("Saldo insuficiente de DOGE")
 
         # Iniciar monitoreo para TP/SL en un hilo separado
-        threading.Thread(target=monitor_price).start()
+        threading.Thread(target=monitor_price, daemon=True).start()
 
         return jsonify({
             "status": "success",
@@ -101,19 +109,6 @@ def webhook():
         operation_in_progress = False
         return jsonify({"error": str(e)}), 500
 
-def get_balance(currency):
-    """Obtener balance de una moneda específica utilizando el cliente User."""
-    try:
-        accounts = user_client.get_account_list()
-        for account in accounts:
-            if account['currency'] == currency and account['type'] == 'trade':
-                balance = float(account['balance'])
-                app.logger.info(f"Saldo {currency}: {balance}")
-                return balance
-        return 0.0
-    except Exception as e:
-        app.logger.error(f"Error obteniendo balance para {currency}: {e}")
-        return 0.0
 
 def close_current_operation():
     """Cerrar la operación actual de manera segura."""
@@ -156,7 +151,7 @@ def monitor_price():
                     app.logger.info("Stop Loss alcanzado.")
                     break
 
-            time.sleep(5)
+            time.sleep(1)  # Reducir el tiempo de espera para una mayor rapidez de reacción
 
         except Exception as e:
             app.logger.error(f"Error monitoreando el precio: {e}")
@@ -173,6 +168,28 @@ def sell_all():
         response = trade_client.create_market_order(SYMBOL, "sell", size=round(doge_balance, 2))
         app.logger.info(f"Orden de venta ejecutada: {response}")
     operation_in_progress = False
+
+def get_balance(asset):
+    """Obtener el balance de un activo (USDT o DOGE)."""
+    if asset == "USDT":
+        balance = user_client.get_balance('USDT')
+        return float(balance['available'])
+    elif asset == "DOGE":
+        balance = user_client.get_balance('DOGE')
+        return float(balance['available'])
+    return 0
+
+def get_min_increment(action):
+    """Obtener el incremento mínimo permitido por KuCoin para comprar/vender."""
+    if action == "buy":
+        return 0.001  # Ejemplo de incremento mínimo para compra de DOGE
+    elif action == "sell":
+        return 0.001  # Ejemplo de incremento mínimo para venta de DOGE
+    return 0
+
+def adjust_to_increment(amount, min_increment):
+    """Ajustar la cantidad a comprar/vender al incremento mínimo permitido."""
+    return round(amount / min_increment) * min_increment
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
