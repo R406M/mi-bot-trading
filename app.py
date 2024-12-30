@@ -49,7 +49,6 @@ def webhook():
     if operation_in_progress and current_order.get('side') != action:
         app.logger.warning("Operación en curso pero señal opuesta recibida, cerrando operación actual...")
         close_current_operation()
-        operation_in_progress = False
 
     if operation_in_progress:
         app.logger.warning("Operación en curso, señal rechazada.")
@@ -64,10 +63,6 @@ def webhook():
         if action == "buy":
             usdt_balance = get_balance("USDT") * 0.85  # Usar solo el 85% del saldo USDT
             if usdt_balance > 0:
-                min_increment = get_min_increment("buy")
-                adjusted_amount = usdt_balance / current_price
-                adjusted_amount = adjust_to_increment(adjusted_amount, min_increment)
-
                 response = trade_client.create_market_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
                 app.logger.info(f"Compra ejecutada: {response}")
                 current_order.update({
@@ -81,10 +76,7 @@ def webhook():
         elif action == "sell":
             doge_balance = get_balance("DOGE") * 0.85  # Usar solo el 85% del saldo DOGE
             if doge_balance > 0:
-                min_increment = get_min_increment("sell")
-                adjusted_amount = adjust_to_increment(doge_balance, min_increment)
-
-                response = trade_client.create_market_order(SYMBOL, "sell", size=adjusted_amount)
+                response = trade_client.create_market_order(SYMBOL, "sell", size=round(doge_balance, 2))
                 app.logger.info(f"Venta ejecutada: {response}")
                 current_order.update({
                     "side": "sell",
@@ -109,6 +101,19 @@ def webhook():
         operation_in_progress = False
         return jsonify({"error": str(e)}), 500
 
+def get_balance(currency):
+    """Obtener balance de una moneda específica utilizando el cliente User."""
+    try:
+        accounts = user_client.get_account_list()
+        for account in accounts:
+            if account['currency'] == currency and account['type'] == 'trade':
+                balance = float(account['balance'])
+                app.logger.info(f"Saldo {currency}: {balance}")
+                return balance
+        return 0.0
+    except Exception as e:
+        app.logger.error(f"Error obteniendo balance para {currency}: {e}")
+        return 0.0
 
 def close_current_operation():
     """Cerrar la operación actual de manera segura."""
@@ -123,7 +128,6 @@ def close_current_operation():
         app.logger.info("Operación de venta cerrada manualmente.")
     operation_in_progress = False
     current_order.clear()
-
 
 def monitor_price():
     """Monitorear el precio para cerrar posiciones con TP o SL."""
@@ -166,10 +170,9 @@ def sell_all():
     global operation_in_progress
     doge_balance = get_balance("DOGE") * 0.98
     if doge_balance > 0:
-        response = trade_client.create_market_order(SYMBOL, "sell", size=doge_balance)
+        response = trade_client.create_market_order(SYMBOL, "sell", size=round(doge_balance, 2))
         app.logger.info(f"Orden de venta ejecutada: {response}")
     operation_in_progress = False
-
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=True)
