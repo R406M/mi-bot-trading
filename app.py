@@ -46,7 +46,7 @@ def webhook():
     logger.info(f"Datos recibidos: {data}")
 
     if not data or data.get('token') != SECRET_TOKEN:
-        logger.error("Token inválido recibido.")
+        logger.error(f"Token inválido recibido: {data.get('token')}")
         return jsonify({"error": "Token inválido"}), 403
 
     action = data.get('action')
@@ -133,8 +133,13 @@ def close_current_operation():
     state.current_order.clear()
 
 def monitor_price():
+    start_time = time.time()
     while state.operation_in_progress:
         try:
+            if time.time() - start_time > 1800:  # Salir después de 30 minutos
+                logger.warning("Límite de tiempo alcanzado para monitorear el precio.")
+                break
+
             ticker = safe_get_ticker(SYMBOL)
             if not ticker:
                 break
@@ -165,14 +170,19 @@ def sell_all():
         logger.info(f"Orden de venta ejecutada: {response}")
 
 def safe_get_balance(asset):
-    """Obtener el balance de un activo (USDT o DOGE) de forma segura."""
     retries = 3
     for i in range(retries):
         try:
             accounts = user_client.get_account_list()
             for account in accounts:
                 if account['currency'] == asset and account['type'] == 'trade':
-                    return float(account['balance'])
+                    balance = float(account['balance'])
+                    if balance > 0:
+                        return balance
+                    else:
+                        app.logger.warning(f"Balance insuficiente para {asset}")
+                        return 0
+            app.logger.warning(f"No se encontró balance para {asset}")
             return 0
         except Exception as e:
             app.logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
@@ -199,10 +209,14 @@ def safe_create_order(symbol, side, **kwargs):
                 return trade_client.create_market_order(symbol, side, size=kwargs['size'])
         except Exception as e:
             logger.error(f"Error creando orden {side} para {symbol}: ({i+1}/{retries}) {e}")
+            if hasattr(e, 'message'):
+                logger.error(f"Detalles del error: {e.message}")
             time.sleep(5)
     return None
 
 def adjust_to_increment(amount, min_increment):
+    if amount < min_increment:
+        return min_increment
     return round(amount / min_increment) * min_increment
 
 if __name__ == '__main__':
