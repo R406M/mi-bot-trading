@@ -169,11 +169,11 @@ def safe_get_balance(asset):
     retries = 3
     for i in range(retries):
         try:
-            accounts = user_client.get_account_list()  # Obtener todas las cuentas
+            accounts = user_client.get_account_list()
             for account in accounts:
                 if account['currency'] == asset and account['type'] == 'trade':
-                    return float(account['available'])  # Saldo disponible
-            return 0  # Si no se encuentra el saldo del activo
+                    return float(account['balance'])
+            return 0
         except Exception as e:
             app.logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
             time.sleep(5)
