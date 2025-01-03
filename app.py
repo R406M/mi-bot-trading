@@ -92,18 +92,13 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 def handle_buy(current_price):
-    # Usar el 85% del saldo en USDT para comprar DOGE
-    usdt_balance = safe_get_balance("USDT") * 0.85  # 85% del saldo en USDT
+    usdt_balance = safe_get_balance("USDT") * 0.85
     if usdt_balance > 0:
-        # Calcular la cantidad de DOGE que se puede comprar
         adjusted_amount = usdt_balance / current_price
         adjusted_amount = adjust_to_increment(adjusted_amount, 0.001)
-
-        # Realizar la compra
         response = safe_create_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
         logger.info(f"Compra ejecutada: {response}")
         
-        # Establecer precios de TP y SL
         state.current_order.update({
             "side": "buy",
             "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT),
@@ -111,16 +106,14 @@ def handle_buy(current_price):
         })
     else:
         raise Exception("Saldo insuficiente de USDT")
-
 def handle_sell(current_price):
     doge_balance = safe_get_balance("DOGE") * 0.85
-    min_sell_amount = 1  # Asumimos que KuCoin permite una venta mínima de 1 DOGE
+    min_sell_amount = 1
 
-    # Verifica si el saldo de DOGE es suficiente
     if doge_balance >= min_sell_amount:
-        adjusted_amount = adjust_to_increment(doge_balance, 0.001)  # Redondeo a un incremento permitido
+        adjusted_amount = adjust_to_increment(doge_balance, 0.001)
 
-        if adjusted_amount < min_sell_amount:  # Si el monto ajustado es menor al mínimo, no hacer la venta
+        if adjusted_amount < min_sell_amount:
             raise Exception(f"El monto a vender ({adjusted_amount} DOGE) es menor al mínimo permitido ({min_sell_amount} DOGE)")
 
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
@@ -132,7 +125,18 @@ def handle_sell(current_price):
         })
     else:
         raise Exception("Saldo insuficiente de DOGE para realizar la venta")
-    def monitor_price():
+
+def close_current_operation():
+    if state.current_order['side'] == "buy":
+        sell_all()
+        logger.info("Operación de compra cerrada manualmente.")
+    elif state.current_order['side'] == "sell":
+        sell_all()
+        logger.info("Operación de venta cerrada manualmente.")
+    state.current_order.clear()
+    state.operation_in_progress = False
+
+def monitor_price():
     start_time = time.time()
     while state.operation_in_progress:
         try:
@@ -143,7 +147,6 @@ def handle_sell(current_price):
             ticker = safe_get_ticker(SYMBOL)
             if not ticker:
                 break
-
             current_price = float(ticker['price'])
             logger.info(f"Precio actual monitoreado: {current_price}")
 
@@ -183,16 +186,10 @@ def safe_get_balance(asset):
             accounts = user_client.get_account_list()
             for account in accounts:
                 if account['currency'] == asset and account['type'] == 'trade':
-                    balance = float(account['balance'])
-                    if balance > 0:
-                        return balance
-                    else:
-                        app.logger.warning(f"Balance insuficiente para {asset}")
-                        return 0
-            app.logger.warning(f"No se encontró balance para {asset}")
+                    return float(account['balance'])
             return 0
         except Exception as e:
-            app.logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
+            logger.error(f"Error obteniendo saldo para {asset}: {e}")
             time.sleep(5)
     return 0
 
@@ -202,7 +199,7 @@ def safe_get_ticker(symbol):
         try:
             return market_client.get_ticker(symbol)
         except Exception as e:
-            logger.error(f"Error obteniendo ticker para {symbol}: ({i+1}/{retries}) {e}")
+            logger.error(f"Error obteniendo ticker para {symbol}: {e}")
             time.sleep(5)
     return None
 
@@ -215,7 +212,7 @@ def safe_create_order(symbol, side, **kwargs):
             else:
                 return trade_client.create_market_order(symbol, side, size=kwargs['size'])
         except Exception as e:
-            logger.error(f"Error creando orden {side} para {symbol}: ({i+1}/{retries}) {e}")
+            logger.error(f"Error creando orden {side} para {symbol}: {e}")
             time.sleep(5)
     return None
 
