@@ -132,32 +132,18 @@ def handle_sell(current_price):
         })
     else:
         raise Exception("Saldo insuficiente de DOGE para realizar la venta")
-
-
-def close_current_operation():
-    if state.current_order['side'] == "buy":
-        sell_all()
-        logger.info("Operación de compra cerrada manualmente.")
-    elif state.current_order['side'] == "sell":
-        sell_all()
-        logger.info("Operación de venta cerrada manualmente.")
-    # Limpiar los valores de tp_price y sl_price después de cerrar la operación
-    state.current_order['tp_price'] = None
-    state.current_order['sl_price'] = None
-    state.operation_in_progress = False
-    state.current_order.clear()
-
-def monitor_price():
+    def monitor_price():
     start_time = time.time()
     while state.operation_in_progress:
         try:
-            if time.time() - start_time > 1800:  # Salir después de 30 minutos
+            if time.time() - start_time > 1800:
                 logger.warning("Límite de tiempo alcanzado para monitorear el precio.")
                 break
 
             ticker = safe_get_ticker(SYMBOL)
             if not ticker:
                 break
+
             current_price = float(ticker['price'])
             logger.info(f"Precio actual monitoreado: {current_price}")
 
@@ -179,11 +165,10 @@ def monitor_price():
     state.current_order.clear()
 
 def sell_all():
-    # Usar el 85% del saldo en DOGE para vender cuando se cierre la operación
-    doge_balance = safe_get_balance("DOGE") * 0.85  # 85% del saldo en DOGE
+    doge_balance = safe_get_balance("DOGE") * 0.85
     if doge_balance > 0:
         adjusted_amount = adjust_to_increment(doge_balance, 0.001)
-        if adjusted_amount >= 1:  # Asegurarse de que la cantidad cumpla con el mínimo de KuCoin
+        if adjusted_amount >= 1:
             response = safe_create_order(SYMBOL, "sell", size=round(adjusted_amount, 2))
             logger.info(f"Orden de venta ejecutada: {response}")
         else:
