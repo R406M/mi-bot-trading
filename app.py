@@ -92,13 +92,18 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 def handle_buy(current_price):
-    usdt_balance = safe_get_balance("USDT") * 0.85
+    # Usar el 85% del saldo en USDT para comprar DOGE
+    usdt_balance = safe_get_balance("USDT") * 0.85  # 85% del saldo en USDT
     if usdt_balance > 0:
+        # Calcular la cantidad de DOGE que se puede comprar
         adjusted_amount = usdt_balance / current_price
         adjusted_amount = adjust_to_increment(adjusted_amount, 0.001)
 
+        # Realizar la compra
         response = safe_create_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
         logger.info(f"Compra ejecutada: {response}")
+        
+        # Establecer precios de TP y SL
         state.current_order.update({
             "side": "buy",
             "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT),
@@ -108,12 +113,16 @@ def handle_buy(current_price):
         raise Exception("Saldo insuficiente de USDT")
 
 def handle_sell(current_price):
-    doge_balance = safe_get_balance("DOGE") * 0.85
+    # Usar el 85% del saldo en DOGE para vender
+    doge_balance = safe_get_balance("DOGE") * 0.85  # 85% del saldo en DOGE
     if doge_balance > 0:
         adjusted_amount = adjust_to_increment(doge_balance, 0.001)
 
+        # Realizar la venta
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
         logger.info(f"Venta ejecutada: {response}")
+
+        # Establecer precios de TP y SL
         state.current_order.update({
             "side": "sell",
             "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT),
@@ -167,10 +176,17 @@ def monitor_price():
     state.current_order.clear()
 
 def sell_all():
-    doge_balance = safe_get_balance("DOGE") * 0.98
+    # Usar el 85% del saldo en DOGE para vender cuando se cierre la operación
+    doge_balance = safe_get_balance("DOGE") * 0.85  # 85% del saldo en DOGE
     if doge_balance > 0:
-        response = safe_create_order(SYMBOL, "sell", size=round(doge_balance, 2))
-        logger.info(f"Orden de venta ejecutada: {response}")
+        adjusted_amount = adjust_to_increment(doge_balance, 0.001)
+        if adjusted_amount >= 1:  # Asegurarse de que la cantidad cumpla con el mínimo de KuCoin
+            response = safe_create_order(SYMBOL, "sell", size=round(adjusted_amount, 2))
+            logger.info(f"Orden de venta ejecutada: {response}")
+        else:
+            logger.error("El saldo de DOGE es insuficiente para realizar la venta.")
+    else:
+        logger.error("Saldo insuficiente de DOGE para vender")
 
 def safe_get_balance(asset):
     retries = 3
@@ -212,15 +228,11 @@ def safe_create_order(symbol, side, **kwargs):
                 return trade_client.create_market_order(symbol, side, size=kwargs['size'])
         except Exception as e:
             logger.error(f"Error creando orden {side} para {symbol}: ({i+1}/{retries}) {e}")
-            if hasattr(e, 'message'):
-                logger.error(f"Detalles del error: {e.message}")
             time.sleep(5)
     return None
 
-def adjust_to_increment(amount, min_increment):
-    if amount < min_increment:
-        return min_increment
-    return round(amount / min_increment) * min_increment
+def adjust_to_increment(amount, increment):
+    return round(amount / increment) * increment
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)
+    app.run(host='0.0.0.0', port=5000, debug=True)
