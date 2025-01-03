@@ -129,6 +129,9 @@ def close_current_operation():
     elif state.current_order['side'] == "sell":
         sell_all()
         logger.info("Operación de venta cerrada manualmente.")
+    # Limpiar los valores de tp_price y sl_price después de cerrar la operación
+    state.current_order['tp_price'] = None
+    state.current_order['sl_price'] = None
     state.operation_in_progress = False
     state.current_order.clear()
 
