@@ -165,13 +165,17 @@ def sell_all():
         logger.info(f"Orden de venta ejecutada: {response}")
 
 def safe_get_balance(asset):
+    """Obtener el balance de un activo (USDT o DOGE) de forma segura."""
     retries = 3
     for i in range(retries):
         try:
-            balance = user_client.get_balance(asset)
-            return float(balance['available'])
+            accounts = user_client.get_account_list()  # Obtener todas las cuentas
+            for account in accounts:
+                if account['currency'] == asset and account['type'] == 'trade':
+                    return float(account['available'])  # Saldo disponible
+            return 0  # Si no se encuentra el saldo del activo
         except Exception as e:
-            logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
+            app.logger.error(f"Error obteniendo saldo para {asset}: ({i+1}/{retries}) {e}")
             time.sleep(5)
     return 0
 
