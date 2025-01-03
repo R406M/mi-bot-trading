@@ -113,23 +113,26 @@ def handle_buy(current_price):
         raise Exception("Saldo insuficiente de USDT")
 
 def handle_sell(current_price):
-    # Usar el 85% del saldo en DOGE para vender
-    doge_balance = safe_get_balance("DOGE") * 0.85  # 85% del saldo en DOGE
-    if doge_balance > 0:
-        adjusted_amount = adjust_to_increment(doge_balance, 0.001)
+    doge_balance = safe_get_balance("DOGE") * 0.85
+    min_sell_amount = 1  # Asumimos que KuCoin permite una venta mínima de 1 DOGE
 
-        # Realizar la venta
+    # Verifica si el saldo de DOGE es suficiente
+    if doge_balance >= min_sell_amount:
+        adjusted_amount = adjust_to_increment(doge_balance, 0.001)  # Redondeo a un incremento permitido
+
+        if adjusted_amount < min_sell_amount:  # Si el monto ajustado es menor al mínimo, no hacer la venta
+            raise Exception(f"El monto a vender ({adjusted_amount} DOGE) es menor al mínimo permitido ({min_sell_amount} DOGE)")
+
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
         logger.info(f"Venta ejecutada: {response}")
-
-        # Establecer precios de TP y SL
         state.current_order.update({
             "side": "sell",
             "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT),
             "sl_price": current_price * (1 + STOP_LOSS_PERCENT)
         })
     else:
-        raise Exception("Saldo insuficiente de DOGE")
+        raise Exception("Saldo insuficiente de DOGE para realizar la venta")
+
 
 def close_current_operation():
     if state.current_order['side'] == "buy":
