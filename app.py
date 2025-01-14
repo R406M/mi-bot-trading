@@ -98,7 +98,7 @@ def handle_buy(current_price):
         adjusted_amount = adjust_to_increment(adjusted_amount, 0.001)
         response = safe_create_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
         logger.info(f"Compra ejecutada: {response}")
-        
+
         state.current_order.update({
             "side": "buy",
             "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT),
@@ -106,6 +106,7 @@ def handle_buy(current_price):
         })
     else:
         raise Exception("Saldo insuficiente de USDT")
+
 def handle_sell(current_price):
     doge_balance = safe_get_balance("DOGE") * 0.85
     min_sell_amount = 1
@@ -118,6 +119,7 @@ def handle_sell(current_price):
 
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
         logger.info(f"Venta ejecutada: {response}")
+
         state.current_order.update({
             "side": "sell",
             "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT),
@@ -127,10 +129,10 @@ def handle_sell(current_price):
         raise Exception("Saldo insuficiente de DOGE para realizar la venta")
 
 def close_current_operation():
-    if state.current_order['side'] == "buy":
+    if state.current_order.get('side') == "buy":
         sell_all()
         logger.info("Operación de compra cerrada manualmente.")
-    elif state.current_order['side'] == "sell":
+    elif state.current_order.get('side') == "sell":
         sell_all()
         logger.info("Operación de venta cerrada manualmente.")
     state.current_order.clear()
@@ -150,15 +152,20 @@ def monitor_price():
             current_price = float(ticker['price'])
             logger.info(f"Precio actual monitoreado: {current_price}")
 
+            if "side" not in state.current_order or "tp_price" not in state.current_order or "sl_price" not in state.current_order:
+                logger.error("Faltan claves en current_order")
+                break
+
             if state.current_order['side'] == "buy":
                 if current_price >= state.current_order['tp_price'] or current_price <= state.current_order['sl_price']:
                     sell_all()
                     break
             elif state.current_order['side'] == "sell":
                 if current_price <= state.current_order['tp_price'] or current_price >= state.current_order['sl_price']:
+                    sell_all()
                     break
 
-            time.sleep(1)
+            time.sleep(5)  # Aumenta el intervalo a 5 segundos para reducir la carga del sistema
 
         except Exception as e:
             logger.error(f"Error monitoreando el precio: {e}")
