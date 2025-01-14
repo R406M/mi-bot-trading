@@ -77,6 +77,8 @@ def webhook():
         elif action == "sell":
             handle_sell(current_price)
 
+        logger.info(f"Estado actual de la orden: {state.current_order}")
+
         if "tp_price" not in state.current_order or "sl_price" not in state.current_order:
             raise Exception("Faltan claves 'tp_price' o 'sl_price' en current_order")
 
@@ -107,6 +109,7 @@ def handle_buy(current_price):
             "tp_price": current_price * (1 + TAKE_PROFIT_PERCENT),
             "sl_price": current_price * (1 - STOP_LOSS_PERCENT)
         })
+        logger.info(f"Orden de compra establecida: {state.current_order}")
     else:
         raise Exception("Saldo insuficiente de USDT")
 
@@ -128,6 +131,7 @@ def handle_sell(current_price):
             "tp_price": current_price * (1 - TAKE_PROFIT_PERCENT),
             "sl_price": current_price * (1 + STOP_LOSS_PERCENT)
         })
+        logger.info(f"Orden de venta establecida: {state.current_order}")
     else:
         raise Exception("Saldo insuficiente de DOGE para realizar la venta")
 
