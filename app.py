@@ -77,6 +77,9 @@ def webhook():
         elif action == "sell":
             handle_sell(current_price)
 
+        if "tp_price" not in state.current_order or "sl_price" not in state.current_order:
+            raise Exception("Faltan claves 'tp_price' o 'sl_price' en current_order")
+
         threading.Thread(target=monitor_price, daemon=True).start()
 
         return jsonify({
