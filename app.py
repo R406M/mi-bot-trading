@@ -19,6 +19,7 @@ SYMBOL = "DOGE-USDT"
 TAKE_PROFIT_PERCENT = 0.2
 STOP_LOSS_PERCENT = 0.5
 MIN_ORDER_SIZE = 1  # Tamaño mínimo de la orden para DOGE
+MIN_TRADE_AMOUNT = 0.50  # Monto mínimo para operar en KuCoin
 
 # Clientes de KuCoin
 try:
@@ -28,7 +29,6 @@ try:
 except Exception as e:
     app.logger.error(f"Error inicializando clientes KuCoin: {e}")
     raise SystemExit("Error crítico al conectar con KuCoin")
-
 # Estado del bot
 class BotState:
     def __init__(self):
@@ -63,7 +63,6 @@ def webhook():
     if state.operation_in_progress:
         logger.warning("Operación en curso, señal rechazada.")
         return jsonify({"status": "busy", "message": "Esperando a que finalice la operación actual"}), 200
-
     try:
         state.operation_in_progress = True
         ticker = safe_get_ticker(SYMBOL)
@@ -96,12 +95,14 @@ def webhook():
         logger.error(f"Error procesando la señal: {e}")
         state.operation_in_progress = False
         return jsonify({"error": str(e)}), 500
-
 def handle_buy(current_price):
     usdt_balance = safe_get_balance("USDT") * 0.85
-    if usdt_balance > 0:
+    if usdt_balance >= MIN_TRADE_AMOUNT:
         adjusted_amount = usdt_balance / current_price
         adjusted_amount = adjust_to_increment(adjusted_amount, 0.001)
+        if adjusted_amount * current_price < MIN_TRADE_AMOUNT:
+            raise Exception(f"El monto ajustado para comprar ({adjusted_amount * current_price} USDT) es menor al mínimo permitido ({MIN_TRADE_AMOUNT} USDT)")
+
         response = safe_create_order(SYMBOL, "buy", funds=round(usdt_balance, 2))
         logger.info(f"Compra ejecutada: {response}")
 
@@ -112,16 +113,14 @@ def handle_buy(current_price):
         })
         logger.info(f"Orden de compra establecida: {state.current_order}")
     else:
-        raise Exception("Saldo insuficiente de USDT")
-
+        raise Exception("Saldo insuficiente de USDT para realizar la compra. El saldo debe ser al menos $0.50.")
 def handle_sell(current_price):
     doge_balance = safe_get_balance("DOGE") * 0.85
 
     if doge_balance >= MIN_ORDER_SIZE:
         adjusted_amount = adjust_to_increment(doge_balance, 0.001)
-
-        if adjusted_amount < MIN_ORDER_SIZE:
-            raise Exception(f"El monto a vender ({adjusted_amount} DOGE) es menor al mínimo permitido ({MIN_ORDER_SIZE} DOGE)")
+        if adjusted_amount * current_price < MIN_TRADE_AMOUNT:
+            raise Exception(f"El monto ajustado para vender ({adjusted_amount * current_price} USDT) es menor al mínimo permitido ({MIN_TRADE_AMOUNT} USDT)")
 
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
         logger.info(f"Venta ejecutada: {response}")
@@ -133,8 +132,9 @@ def handle_sell(current_price):
         })
         logger.info(f"Orden de venta establecida: {state.current_order}")
     else:
-        raise Exception("Saldo insuficiente de DOGE para realizar la venta")
-
+        logger.error("Saldo insuficiente de DOGE para realizar la venta.")
+        state.operation_in_progress = False
+        raise Exception("Saldo insuficiente de DOGE para realizar la venta.")
 def close_current_operation():
     if state.current_order.get('side') == "buy":
         sell_all()
@@ -180,7 +180,6 @@ def monitor_price():
 
     state.operation_in_progress = False
     state.current_order.clear()
-
 def sell_all():
     doge_balance = safe_get_balance("DOGE") * 0.85
     if doge_balance > 0:
