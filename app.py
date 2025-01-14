@@ -18,6 +18,7 @@ API_PASSPHRASE = os.getenv("KUCOIN_PASSPHRASE")
 SYMBOL = "DOGE-USDT"
 TAKE_PROFIT_PERCENT = 0.2
 STOP_LOSS_PERCENT = 0.5
+MIN_ORDER_SIZE = 1  # Tamaño mínimo de la orden para DOGE
 
 # Clientes de KuCoin
 try:
@@ -115,13 +116,12 @@ def handle_buy(current_price):
 
 def handle_sell(current_price):
     doge_balance = safe_get_balance("DOGE") * 0.85
-    min_sell_amount = 1
 
-    if doge_balance >= min_sell_amount:
+    if doge_balance >= MIN_ORDER_SIZE:
         adjusted_amount = adjust_to_increment(doge_balance, 0.001)
 
-        if adjusted_amount < min_sell_amount:
-            raise Exception(f"El monto a vender ({adjusted_amount} DOGE) es menor al mínimo permitido ({min_sell_amount} DOGE)")
+        if adjusted_amount < MIN_ORDER_SIZE:
+            raise Exception(f"El monto a vender ({adjusted_amount} DOGE) es menor al mínimo permitido ({MIN_ORDER_SIZE} DOGE)")
 
         response = safe_create_order(SYMBOL, "sell", size=adjusted_amount)
         logger.info(f"Venta ejecutada: {response}")
@@ -185,7 +185,7 @@ def sell_all():
     doge_balance = safe_get_balance("DOGE") * 0.85
     if doge_balance > 0:
         adjusted_amount = adjust_to_increment(doge_balance, 0.001)
-        if adjusted_amount >= 1:
+        if adjusted_amount >= MIN_ORDER_SIZE:
             response = safe_create_order(SYMBOL, "sell", size=round(adjusted_amount, 2))
             logger.info(f"Orden de venta ejecutada: {response}")
         else:
@@ -234,4 +234,4 @@ def adjust_to_increment(amount, increment):
     return round(amount / increment) * increment
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug
