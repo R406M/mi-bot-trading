@@ -1,6 +1,14 @@
+RutaLLM
+Enrutamiento a Claude Sonnet 3.5
+Basándome en el código anterior, el archivo requirements.txt necesita algunas modificaciones para incluir todas las dependencias necesarias. Aquí está la versión mejorada:
+
 Flask>=2.0.0
 gunicorn>=20.0.0
 kucoin-python>=1.0.0
 requests>=2.0.0
-python-dotenv>=0.20.0  # Opcional, para manejo de .env localmente
-flask-cors>=3.0.0      # Opcional, para manejar CORS si es necesario
+python-dotenv>=0.20.0
+flask-cors>=3.0.0
+pandas>=1.5.0
+python-dateutil>=2.8.2
+typing-extensions>=4.0.0
+dataclasses>=0.6; python_version < '3.7'
