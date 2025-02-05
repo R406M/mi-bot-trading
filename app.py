@@ -1,113 +1,225 @@
 import os
-import logging
-from flask import Flask, request, jsonify
+import time
+import threading
+from datetime import datetime
+from typing import Dict, Optional
+from dataclasses import dataclass
 import ccxt
+from flask import Flask, request, jsonify
+from loguru import logger
+from dotenv import load_dotenv
 
-# Configuración básica de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    filename='bot.log'  # Guarda los logs en un archivo
-)
+# Configuración de logging
+logger.add("trading_bot.log", rotation="500 MB", retention="10 days")
 
-app = Flask(__name__)
+# Cargar variables de entorno
+load_dotenv()
 
-# Configuración de KuCoin
-api_key = os.getenv('KUCOIN_API_KEY')        # Clave de API desde variables de entorno
-api_secret = os.getenv('KUCOIN_API_SECRET')  # Secreto de API desde variables de entorno
-api_passphrase = os.getenv('KUCOIN_PASSPHRASE')  # Passphrase desde variables de entorno
+@dataclass
+class Position:
+    entry_price: float
+    size: float
+    side: str
+    tp_price: float
+    sl_price: float
+    timestamp: float
 
-# Inicializar el exchange de KuCoin
-exchange = ccxt.kucoin({
-    'apiKey': api_key,
-    'secret': api_secret,
-    'password': api_passphrase,
-    'enableRateLimit': True,  # Habilita el límite de tasa para evitar baneos
-})
+class TradingBot:
+    def __init__(self):
+        self.api_key = os.getenv('KUCOIN_API_KEY')
+        self.api_secret = os.getenv('KUCOIN_API_SECRET')
+        self.api_passphrase = os.getenv('KUCOIN_PASSPHRASE')
 
-# Par de trading
-SYMBOL = 'DOGE/USDT'
+        self.symbol = "DOGE-USDT"
+        self.tp_percentage = 0.002  # 0.2%
+        self.sl_percentage = 0.005  # 0.5%
+        self.reserve_percentage = 0.10  # 10% reserva
 
-# Take-profit y stop-loss en USDT
-TAKE_PROFIT = 0.2  # 0.2 USDT
-STOP_LOSS = 0.5    # 0.5 USDT
+        self.exchange = self._initialize_exchange()
+        self.current_position: Optional[Position] = None
+        self.position_monitor_thread = None
+        self.should_monitor = False
 
-# Porcentaje del saldo a usar (90%)
-BALANCE_PERCENTAGE = 0.9
+        # Iniciar monitoreo de posiciones
+        self.start_position_monitor()
 
-# Ruta para recibir señales de TradingView
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        # Obtener los datos de la solicitud
-        data = request.json
-
-        # Validar que la señal sea completa
-        if not all(key in data for key in ['side']):
-            logging.error("Señal incompleta recibida: %s", data)
-            return jsonify({"status": "error", "message": "Señal incompleta"}), 400
-
-        # Extraer los datos de la señal
-        side = data['side']  # 'buy' o 'sell'
-
-        # Validar que el lado de la operación sea correcto
-        if side not in ['buy', 'sell']:
-            logging.error("Lado de operación inválido: %s", side)
-            return jsonify({"status": "error", "message": "Lado de operación inválido"}), 400
-
-        # Obtener el saldo disponible en USDT
-        balance = exchange.fetch_balance()
-        usdt_balance = balance['total']['USDT']  # Saldo total en USDT
-        available_balance = usdt_balance * BALANCE_PERCAGE  # Usar el 90% del saldo
-
-        # Obtener el precio actual de DOGE/USDT
-        ticker = exchange.fetch_ticker(SYMBOL)
-        current_price = ticker['last']
-
-        # Calcular la cantidad de DOGE a comprar/vender
-        amount = available_balance / current_price  # Cantidad en DOGE
-
-        # Calcular precios de TP y SL
-        if side == 'buy':
-            tp_price = current_price + (TAKE_PROFIT / amount)  # Precio de take-profit
-            sl_price = current_price - (STOP_LOSS / amount)    # Precio de stop-loss
-        else:
-            tp_price = current_price - (TAKE_PROFIT / amount)  # Precio de take-profit
-            sl_price = current_price + (STOP_LOSS / amount)    # Precio de stop-loss
-
-        # Ejecutar la orden de mercado
+    def _initialize_exchange(self) -> ccxt.Exchange:
+        """Inicializa la conexión con KuCoin"""
         try:
-            market_order = exchange.create_order(SYMBOL, 'market', side, amount)
-            logging.info("Orden de mercado ejecutada: %s", market_order)
+            exchange = ccxt.kucoin({
+                'apiKey': self.api_key,
+                'secret': self.api_secret,
+                'password': self.api_passphrase,
+                'enableRateLimit': True
+            })
+            return exchange
+        except Exception as e:
+            logger.error(f"Error inicializando exchange: {e}")
+            raise
 
-            # Colocar órdenes de take-profit y stop-loss
-            if side == 'buy':
-                tp_order = exchange.create_order(SYMBOL, 'limit', 'sell', amount, tp_price)
-                sl_order = exchange.create_order(SYMBOL, 'limit', 'sell', amount, sl_price)
+    def get_current_price(self) -> float:
+        """Obtiene el precio actual del mercado"""
+        try:
+            ticker = self.exchange.fetch_ticker(self.symbol)
+            return float(ticker['last'])
+        except Exception as e:
+            logger.error(f"Error obteniendo precio: {e}")
+            raise
+
+    def get_balance(self) -> Dict:
+        """Obtiene el balance de la cuenta"""
+        try:
+            balance = self.exchange.fetch_balance()
+            return {
+                'USDT': float(balance['USDT']['free']),
+                'DOGE': float(balance['DOGE']['free'])
+            }
+        except Exception as e:
+            logger.error(f"Error obteniendo balance: {e}")
+            raise
+
+    def execute_market_order(self, side: str, amount: float) -> Dict:
+        """Ejecuta una orden de mercado"""
+        try:
+            order = self.exchange.create_market_order(
+                symbol=self.symbol,
+                side=side,
+                amount=amount if side == 'sell' else None,
+                cost=amount if side == 'buy' else None
+            )
+            logger.info(f"Orden ejecutada: {order}")
+            return order
+        except Exception as e:
+            logger.error(f"Error ejecutando orden: {e}")
+            raise
+
+    def start_position_monitor(self):
+        """Inicia el monitor de posiciones en un thread separado"""
+        if not self.position_monitor_thread:
+            self.should_monitor = True
+            self.position_monitor_thread = threading.Thread(target=self._monitor_positions)
+            self.position_monitor_thread.daemon = True
+            self.position_monitor_thread.start()
+
+    def _monitor_positions(self):
+        """Monitorea las posiciones abiertas para TP/SL"""
+        while self.should_monitor:
+            try:
+                if self.current_position:
+                    current_price = self.get_current_price()
+
+                    # Verificar TP
+                    if (self.current_position.side == 'buy' and
+                        current_price >= self.current_position.tp_price):
+                        self.close_position("TP alcanzado")
+
+                    # Verificar SL
+                    elif (self.current_position.side == 'buy' and
+                          current_price <= self.current_position.sl_price):
+                        self.close_position("SL alcanzado")
+
+                    # Para posiciones en venta
+                    elif (self.current_position.side == 'sell' and
+                          current_price <= self.current_position.tp_price):
+                        self.close_position("TP alcanzado (venta)")
+
+                    elif (self.current_position.side == 'sell' and
+                          current_price >= self.current_position.sl_price):
+                        self.close_position("SL alcanzado (venta)")
+
+            except Exception as e:
+                logger.error(f"Error en monitoreo: {e}")
+
+            time.sleep(1)  # Esperar 1 segundo entre verificaciones
+
+    def close_position(self, reason: str):
+        """Cierra la posición actual"""
+        try:
+            if self.current_position:
+                side = 'sell' if self.current_position.side == 'buy' else 'buy'
+                self.execute_market_order(side, self.current_position.size)
+                logger.info(f"Posición cerrada: {reason}")
+                self.current_position = None
+        except Exception as e:
+            logger.error(f"Error cerrando posición: {e}")
+
+    def process_signal(self, signal_side: str):
+        """Procesa una nueva señal de trading"""
+        try:
+            # Si hay una posición abierta, cerrarla
+            if self.current_position:
+                self.close_position("Nueva señal recibida")
+
+            current_price = self.get_current_price()
+            balance = self.get_balance()
+
+            # Calcular cantidad a operar (90% del balance)
+            if signal_side == 'buy':
+                available_usdt = balance['USDT'] * (1 - self.reserve_percentage)
+                size = available_usdt / current_price
+            else:  # sell
+                available_doge = balance['DOGE'] * (1 - self.reserve_percentage)
+                size = available_doge
+
+            # Ejecutar nueva orden
+            order = self.execute_market_order(signal_side, size)
+
+            # Calcular TP y SL
+            if signal_side == 'buy':
+                tp_price = current_price * (1 + self.tp_percentage)
+                sl_price = current_price * (1 - self.sl_percentage)
             else:
-                tp_order = exchange.create_order(SYMBOL, 'limit', 'buy', amount, tp_price)
-                sl_order = exchange.create_order(SYMBOL, 'limit', 'buy', amount, sl_price)
+                tp_price = current_price * (1 - self.tp_percentage)
+                sl_price = current_price * (1 + self.sl_percentage)
 
-            logging.info("Orden de take-profit colocada: %s", tp_order)
-            logging.info("Orden de stop-loss colocada: %s", sl_order)
+            # Registrar nueva posición
+            self.current_position = Position(
+                entry_price=current_price,
+                size=size,
+                side=signal_side,
+                tp_price=tp_price,
+                sl_price=sl_price,
+                timestamp=time.time()
+            )
 
-            return jsonify({
+            return {
                 "status": "success",
-                "market_order": market_order,
-                "tp_order": tp_order,
-                "sl_order": sl_order,
-                "usdt_balance": usdt_balance,
-                "used_balance": available_balance
-            }), 200
+                "message": f"Orden {signal_side} ejecutada",
+                "entry_price": current_price,
+                "tp_price": tp_price,
+                "sl_price": sl_price,
+                "size": size
+            }
 
         except Exception as e:
-            logging.error("Error al ejecutar órdenes: %s", str(e))
-            return jsonify({"status": "error", "message": str(e)}), 500
+            logger.error(f"Error procesando señal: {e}")
+            raise
+
+# Inicializar Flask y el bot
+app = Flask(__name__)
+trading_bot = TradingBot()
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Endpoint para recibir señales de TradingView"""
+    try:
+        data = request.json
+
+        # Validar datos
+        if not data or 'side' not in data:
+            return jsonify({"error": "Datos inválidos"}), 400
+
+        side = data['side'].lower()
+        if side not in ['buy', 'sell']:
+            return jsonify({"error": "Señal inválida"}), 400
+
+        # Procesar señal
+        result = trading_bot.process_signal(side)
+        return jsonify(result), 200
 
     except Exception as e:
-        logging.error("Error en el webhook: %s", str(e))
-        return jsonify({"status": "error", "message": "Error interno del servidor"}), 500
+        logger.error(f"Error en webhook: {e}")
+        return jsonify({"error": str(e)}), 500
 
-# Iniciar el servidor
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host='0.0.0.0', port=5000)
