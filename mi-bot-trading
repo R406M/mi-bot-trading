@@ -1,15 +1,15 @@
 import os
-import json
 import logging
 import pandas as pd
-from flask import Flask, request, jsonify
 from kucoin.client import Trade, Market
-import threading
 from decimal import Decimal
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
-import time
-from logging.handlers import RotatingFileHandler
+from loguru import logger
+import ccxt
+
+# Configuración de logging con Loguru
+logger.add("trading_bot.log", rotation="1 MB", retention="5 days", level="INFO")
 
 # Configuración de la clase para Trading
 @dataclass
@@ -22,16 +22,113 @@ class TradingConfig:
     retry_attempts: int = 3
     retry_delay: int = 1
 
-# Configuración del logging
-def setup_logging():
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
-    
-    # Handler para archivo con rotación
-    handler = RotatingFileHandler(
-        'trading_bot.log',
-        maxBytes=1024*1024,  # 1MB
-        backupCount=5
-    )
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    handler.setFormatter
+    def validate(self) -> bool:
+        """Valida que la configuración sea correcta."""
+        if self.max_amount <= 0:
+            logger.error("El monto máximo debe ser mayor que 0")
+            return False
+        if self.tp_value <= 0 or self.sl_value <= 0:
+            logger.error("Los valores de TP y SL deben ser mayores que 0")
+            return False
+        return True
+
+# Clase principal del bot de trading
+class TradingBot:
+    def __init__(self, config: TradingConfig):
+        self.config = config
+        self.exchange = self._initialize_exchange()
+
+    def _initialize_exchange(self):
+        """Inicializa la conexión con KuCoin."""
+        api_key = os.getenv('KUCOIN_API_KEY')
+        api_secret = os.getenv('KUCOIN_API_SECRET')
+        api_passphrase = os.getenv('KUCOIN_PASSPHRASE')
+
+        if not all([api_key, api_secret, api_passphrase]):
+            logger.error("Faltan claves de API de KuCoin en las variables de entorno")
+            raise ValueError("Faltan claves de API de KuCoin en las variables de entorno")
+
+        exchange = ccxt.kucoin({
+            'apiKey': api_key,
+            'secret': api_secret,
+            'password': api_passphrase,
+            'enableRateLimit': True,  # Habilita el límite de tasa para evitar baneos
+        })
+        return exchange
+
+    def fetch_market_data(self) -> Optional[Dict[str, Any]]:
+        """Obtiene datos de mercado para el símbolo configurado."""
+        try:
+            ticker = self.exchange.fetch_ticker(self.config.symbol)
+            logger.info(f"Datos de mercado obtenidos: {ticker}")
+            return ticker
+        except Exception as e:
+            logger.error(f"Error al obtener datos de mercado: {e}")
+            return None
+
+    def execute_trade(self, side: str, amount: float) -> Optional[Dict[str, Any]]:
+        """Ejecuta una orden de compra o venta."""
+        if side not in ['buy', 'sell']:
+            logger.error(f"Lado de operación inválido: {side}")
+            return None
+
+        try:
+            order = self.exchange.create_order(
+                symbol=self.config.symbol,
+                type='market',
+                side=side,
+                amount=amount
+            )
+            logger.info(f"Orden ejecutada: {order}")
+            return order
+        except Exception as e:
+            logger.error(f"Error al ejecutar la orden: {e}")
+            return None
+
+    def place_tp_sl_orders(self, side: str, amount: float, current_price: float) -> bool:
+        """Coloca órdenes de take-profit y stop-loss."""
+        try:
+            if side == 'buy':
+                tp_price = current_price + self.config.tp_value
+                sl_price = current_price - self.config.sl_value
+                tp_order = self.exchange.create_order(self.config.symbol, 'limit', 'sell', amount, tp_price)
+                sl_order = self.exchange.create_order(self.config.symbol, 'limit', 'sell', amount, sl_price)
+            else:
+                tp_price = current_price - self.config.tp_value
+                sl_price = current_price + self.config.sl_value
+                tp_order = self.exchange.create_order(self.config.symbol, 'limit', 'buy', amount, tp_price)
+                sl_order = self.exchange.create_order(self.config.symbol, 'limit', 'buy', amount, sl_price)
+
+            logger.info(f"Orden de take-profit colocada: {tp_order}")
+            logger.info(f"Orden de stop-loss colocada: {sl_order}")
+            return True
+        except Exception as e:
+            logger.error(f"Error al colocar órdenes de TP/SL: {e}")
+            return False
+
+    def run(self):
+        """Ejecuta la lógica principal del bot."""
+        if not self.config.validate():
+            logger.error("Configuración inválida. Verifica los parámetros.")
+            return
+
+        market_data = self.fetch_market_data()
+        if not market_data:
+            return
+
+        current_price = market_data['last']
+        amount = self.config.max_amount / current_price  # Cantidad en DOGE
+
+        # Ejecutar la orden de compra/venta
+        order = self.execute_trade('buy', amount)
+        if not order:
+            return
+
+        # Colocar órdenes de TP/SL
+        self.place_tp_sl_orders('buy', amount, current_price)
+
+# Inicializar el bot
+if __name__ == '__main__':
+    config = TradingConfig()
+    bot = TradingBot(config)
+    bot.run()
